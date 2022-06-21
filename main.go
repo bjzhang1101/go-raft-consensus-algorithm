@@ -13,7 +13,6 @@ func main() {
 	mainDone := make(chan os.Signal, 1)
 	signal.Notify(mainDone, syscall.SIGINT, syscall.SIGTERM)
 
-	// Main server for admission review requests.
 	s, err := server.NewServer()
 	if err != nil {
 		os.Exit(1)
