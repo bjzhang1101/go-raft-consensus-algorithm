@@ -2,6 +2,8 @@ package server
 
 import (
 	"github.com/valyala/fasthttp"
+
+	"github.com/bjzhang1101/raft/node"
 )
 
 const (
@@ -12,22 +14,22 @@ const (
 	// maxRequestBodySize is the maximum request body size the server reads.
 	// Server rejects requests with bodies exceeding this limit.
 	maxRequestBodySize = 4 * 1024 * 1024
+
+	statusPath = "/status"
 )
 
-// Handler handles requests.
-type Handler struct{}
-
-// Handle processes a HTTP request to the raft server.
-func (h *Handler) Handle(ctx *fasthttp.RequestCtx) {
-	ctx.Response.Header.SetContentType(contentType)
-	ctx.SetStatusCode(200)
-}
-
 // NewServer creates an HTTP server serving requests.
-func NewServer() (*fasthttp.Server, error) {
-	handler := Handler{}
+func NewServer(node *node.Node) (*fasthttp.Server, error) {
+	handler := NewHandler(node)
 
-	h := func(ctx *fasthttp.RequestCtx) { handler.Handle(ctx) }
+	h := func(ctx *fasthttp.RequestCtx) {
+		switch p := string(ctx.Path()); p {
+		case statusPath:
+			handler.HandleStatus(ctx)
+		default:
+			handler.HandleBlackHole(ctx)
+		}
+	}
 
 	s := fasthttp.Server{
 		Handler:            h,
