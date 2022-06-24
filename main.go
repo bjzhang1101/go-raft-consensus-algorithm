@@ -11,14 +11,13 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/bjzhang1101/raft/grpc"
+	grpc "github.com/bjzhang1101/raft/grpc/server"
 	"github.com/bjzhang1101/raft/http"
 	"github.com/bjzhang1101/raft/node"
 )
 
 var (
 	configFile = pflag.String("config-file", "", "path of the configuration file")
-	ip         = pflag.String("ip", "", "ip of the dest")
 )
 
 func main() {
@@ -32,7 +31,7 @@ func main() {
 		log.Fatalf("failed to load config file: %v", err)
 	}
 
-	n := node.NewNode(c.ID, c.Quorum)
+	n := node.NewNode(c.ID, c.Quorum, grpc.DefaultPort)
 	exit := func(err error) {
 		n.SetState(node.Down)
 		// TODO: change to log.
@@ -48,7 +47,7 @@ func main() {
 	}()
 
 	// Server to respond http requests.
-	httpServer := http.NewServer(n, *ip)
+	httpServer := http.NewServer(n)
 	go func() {
 		addr := fmt.Sprintf(":%d", http.DefaultPort)
 

@@ -4,18 +4,24 @@ option go_package = "github.com/bjzhang1101/raft/grpc/protobuf";
 
 package protobuf;
 
-// The request message containing the user's name.
-message HelloRequest {
-  string name = 1;
+// TickRequest is the message containing information inside a tick.
+message TickRequest {
+  string id = 1;
+  int32 term = 2;
+  string data = 3;
 }
 
-// The response message containing the greetings
-message HelloReply {
-  string message = 1;
+// TickResponse is the message containing whether the tick is accepted.
+message TickResponse {
+  bool accept = 1;
 }
 
-// The greeting service definition.
-service Greeter {
-  // Sends a greeting
-  rpc SayHello (HelloRequest) returns (HelloReply) {}
+service Ticker {
+  // AppendEntry is the function that the Leader sent to followers to sync
+  // data and keep leadership.
+  rpc AppendEntry (TickRequest) returns (TickResponse) {}
+
+  // RequestVote is the function that the Candidate sent to followers to
+  // requests their votes for leader election.
+  rpc RequestVote (TickRequest) returns (TickResponse) {}
 }

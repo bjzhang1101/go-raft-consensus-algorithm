@@ -2,16 +2,19 @@ package node
 
 import (
 	"context"
+	"log"
 	"math/rand"
 	"strings"
 	"time"
+
+	grpc "github.com/bjzhang1101/raft/grpc/client"
 )
 
 const (
-	baseElectionTimeoutMs   = 150
-	jitterElectionTimeoutMs = 150
+	baseElectionTimeoutMs   = 5000
+	jitterElectionTimeoutMs = 5000
 
-	tickInterval = 50 * time.Millisecond
+	tickInterval = 2500 * time.Millisecond
 )
 
 // Node includes all the metadata of a node.
@@ -25,6 +28,9 @@ type Node struct {
 	// Quorum is a list of IP addresses that includes all the nodes that
 	// forms the Raft cluster.
 	Quorum []string
+
+	// TickClients is a list of clients for nodes in the Raft cluster.
+	TickClients []*grpc.Client
 
 	// CurTerm is the current term of the node.
 	//
@@ -40,29 +46,17 @@ type Node struct {
 	// communication over the period of time.
 	ElectionTimeout time.Duration
 
-	// EntryC is the channel for receiving
-	EntryC <-chan Tick
+	// EntryC is the channel for received entries.
+	EntryC chan string
 
-	// Votes is the vote number the node gets after it sends RequestVote
-	// requests to other nodes for leader election.
-	//
-	// Only valid when the node is in Candidate state and will always start
-	// with value 1 before sending RequestVote requests.
-	Votes int
-
-	// Voted indicates whether the follower votes to any Candidates.
-	//
-	// Should be set to false when start as a Follower.
-	Voted bool
-
-	// TickC is the channel for sending tick.
-	//
-	// Only valid when the node is in Leader state.
-	TickC chan Tick
+	// VotedPerTerm indicates whether the follower votes to any Candidate in
+	// a specific term.
+	VotedPerTerm map[int]struct{}
 }
 
 // NewNode returns a new Raft node.
-func NewNode(id string, quorum []string) *Node {
+func NewNode(id string, quorum []string, grpcClientPort int) *Node {
+	log.Printf("initializing raft node %s", id)
 	n := Node{
 		ID:      id,
 		State:   Follower,
@@ -70,8 +64,30 @@ func NewNode(id string, quorum []string) *Node {
 		CurTerm: 0,
 	}
 
+	var tickClients []*grpc.Client
+	for _, member := range quorum {
+		// Skip creating gRPC client for itself.
+		if strings.Compare(member, id) == 0 {
+			continue
+		}
+
+		tickClients = append(tickClients, grpc.NewClient(member, grpcClientPort))
+	}
+
+	n.TickClients = tickClients
+
+	rand.Seed(time.Now().UnixNano())
+
 	n.SetElectionTimeout()
+
+	n.VotedPerTerm = make(map[int]struct{})
+	n.EntryC = make(chan string)
 	return &n
+}
+
+// GetID returns the node's ID.
+func (n *Node) GetID() string {
+	return n.ID
 }
 
 // GetState returns the node's current state.
@@ -89,16 +105,35 @@ func (n *Node) GetCurTerm() int {
 	return n.CurTerm
 }
 
+// IncrementCurTerm increase 1 to the current term.
+func (n *Node) IncrementCurTerm() {
+	n.CurTerm++
+}
+
+// SetCurTerm sets the current term.
+func (n *Node) SetCurTerm(term int) {
+	n.CurTerm = term
+}
+
 // SetElectionTimeout refreshes the node's election timeout by re-generate a
 // random time duration.
 func (n *Node) SetElectionTimeout() {
-	rand.Seed(time.Now().UnixNano())
 	n.ElectionTimeout = time.Duration(rand.Intn(baseElectionTimeoutMs)+jitterElectionTimeoutMs) * time.Millisecond
 }
 
-// SetVoted sets whether the node already votes to a Candidate.
-func (n *Node) SetVoted(voted bool) {
-	n.Voted = voted
+// GetVotedPerTerm returns the hash set of voted term.
+func (n *Node) GetVotedPerTerm() map[int]struct{} {
+	return n.VotedPerTerm
+}
+
+// SetVotedForTerm adds the term in the VotedPerTerm hash set.
+func (n *Node) SetVotedForTerm(term int) {
+	n.VotedPerTerm[term] = struct{}{}
+}
+
+// AppendEntryC appends the entry channel with the data.
+func (n *Node) AppendEntryC(data string) {
+	n.EntryC <- data
 }
 
 // Start is the main goroutine for a node's main functionality.
@@ -124,25 +159,32 @@ func (n *Node) Start(ctx context.Context) <-chan struct{} {
 }
 
 func (n *Node) startFollower(ctx context.Context) error {
-	n.SetVoted(false)
-
+	log.Printf("node %s became Follower", n.ID)
 	for {
 		select {
 		case <-time.After(n.ElectionTimeout):
 			n.SetState(Candidate)
-		default:
+			return nil
+		case data := <-n.EntryC:
+			n.SetElectionTimeout()
+			log.Printf("node %s received data %s", n.ID, data)
 		}
 	}
 }
 
 func (n *Node) startCandidate(ctx context.Context) error {
-	n.SetVoted(true)
+	log.Printf("node %s became Candidate", n.ID)
+
 	n.SetElectionTimeout()
+	n.IncrementCurTerm()
+	n.SetVotedForTerm(n.GetCurTerm())
 
 	votes, err := n.requestVote(ctx)
 	if err != nil {
 		return err
 	}
+
+	log.Printf("node %s receives %d votes in term %d", n.ID, votes, n.GetCurTerm())
 
 	if votes > len(n.Quorum)/2 {
 		n.SetState(Leader)
@@ -154,17 +196,14 @@ func (n *Node) startCandidate(ctx context.Context) error {
 }
 
 func (n *Node) startLeader(ctx context.Context) error {
+	log.Printf("node %s became Leader", n.ID)
+
 	for {
 		select {
 		case <-time.After(tickInterval):
-			if err := n.appendEntries(ctx, Tick{}); err != nil {
-				// TODO: handle error.
+			if err := n.appendEntries(ctx, "this is a heartbeat"); err != nil {
+				log.Fatalf("node %s failed to send tick", n.ID)
 			}
-		case entry := <-n.EntryC:
-			if err := n.appendEntries(ctx, entry); err != nil {
-				// TODO: handle error.
-			}
-		default:
 		}
 	}
 }
@@ -172,22 +211,23 @@ func (n *Node) startLeader(ctx context.Context) error {
 func (n *Node) requestVote(ctx context.Context) (int, error) {
 	votes := 1
 
-	// TODO: update the RPC request to async.
-	for _, member := range n.Quorum {
-		if strings.Compare(member, n.ID) == 0 {
-			continue
-		}
+	for _, c := range n.TickClients {
+		accepted := c.RequestVote(ctx, n.GetID(), n.GetCurTerm(), "this is a request vote request")
+		log.Printf("node %s votes for %v", c.GetAddress(), accepted)
 
-		// resp := n.SendRequest(member)
-		resp := TickResp{}
-
-		if resp.GetConsensus() {
+		if accepted {
 			votes++
 		}
 	}
+
 	return votes, nil
 }
 
-func (n *Node) appendEntries(ctx context.Context, tick Tick) error {
+func (n *Node) appendEntries(ctx context.Context, data string) error {
+	for _, c := range n.TickClients {
+		resp := c.AppendEntry(ctx, n.GetID(), n.GetCurTerm(), data)
+		log.Printf("receive heartbeat response %s from %s in term %d", resp, c.GetAddress(), n.GetCurTerm())
+	}
+
 	return nil
 }

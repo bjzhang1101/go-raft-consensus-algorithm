@@ -1,6 +1,8 @@
 package http
 
 import (
+	"log"
+
 	"github.com/valyala/fasthttp"
 
 	"github.com/bjzhang1101/raft/node"
@@ -16,20 +18,17 @@ const (
 	maxRequestBodySize = 4 * 1024 * 1024
 
 	statusPath = "/state"
-
-	grpcPath = "/grpc"
 )
 
 // NewServer creates an HTTP server serving requests.
-func NewServer(node *node.Node, ip string) *fasthttp.Server {
+func NewServer(node *node.Node) *fasthttp.Server {
+	log.Printf("starting http server listening on :%d", DefaultPort)
 	handler := NewHandler(node)
 
 	h := func(ctx *fasthttp.RequestCtx) {
 		switch p := string(ctx.Path()); p {
 		case statusPath:
 			handler.HandleState(ctx)
-		case grpcPath:
-			handler.HandlerGRPC(ctx, ip)
 		default:
 			handler.HandleBlackHole(ctx)
 		}

@@ -1,4 +1,5 @@
 FROM golang:1.18-bullseye AS builder
+LABEL stage=builder
 
 RUN mkdir -p /build/
 
@@ -13,6 +14,7 @@ RUN apt-get update && \
   apt-get install --no-install-recommends -y \
   ca-certificates \
   curl \
+  dnsutils  \
   netcat \
   tcpdump \
   net-tools \

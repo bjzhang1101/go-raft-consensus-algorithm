@@ -5,8 +5,6 @@ import (
 
 	"github.com/valyala/fasthttp"
 
-	"github.com/bjzhang1101/raft/grpc"
-
 	"github.com/bjzhang1101/raft/node"
 )
 
@@ -33,25 +31,11 @@ func (h *Handler) HandleState(ctx *fasthttp.RequestCtx) {
 
 	s := struct {
 		Status string `json:"status"`
-	}{Status: h.node.GetState().String()}
-
-	body, err := json.Marshal(s)
-	if err != nil {
-		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+		Term   int    `json:"term"`
+	}{
+		Status: h.node.GetState().String(),
+		Term:   h.node.GetCurTerm(),
 	}
-	ctx.SetBody(body)
-}
-
-func (h *Handler) HandlerGRPC(ctx *fasthttp.RequestCtx, ip string) {
-	c := grpc.NewClient(ip, 8081)
-	res := c.SayHello(ctx)
-
-	ctx.Response.Header.SetContentType(contentType)
-	ctx.SetStatusCode(fasthttp.StatusOK)
-
-	s := struct {
-		Response string `json:"response"`
-	}{Response: res}
 
 	body, err := json.Marshal(s)
 	if err != nil {

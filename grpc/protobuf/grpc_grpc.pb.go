@@ -19,88 +19,130 @@ import (
 // Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
-// GreeterClient is the client API for Greeter service.
+// TickerClient is the client API for Ticker service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type GreeterClient interface {
-	// Sends a greeting
-	SayHello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloReply, error)
+type TickerClient interface {
+	// AppendEntry is the function that the Leader sent to followers to sync
+	// data and keep leadership.
+	AppendEntry(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error)
+	// RequestVote is the function that the Candidate sent to followers to
+	// requests their votes for leader election.
+	RequestVote(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error)
 }
 
-type greeterClient struct {
+type tickerClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewGreeterClient(cc grpc.ClientConnInterface) GreeterClient {
-	return &greeterClient{cc}
+func NewTickerClient(cc grpc.ClientConnInterface) TickerClient {
+	return &tickerClient{cc}
 }
 
-func (c *greeterClient) SayHello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloReply, error) {
-	out := new(HelloReply)
-	err := c.cc.Invoke(ctx, "/protobuf.Greeter/SayHello", in, out, opts...)
+func (c *tickerClient) AppendEntry(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error) {
+	out := new(TickResponse)
+	err := c.cc.Invoke(ctx, "/protobuf.Ticker/AppendEntry", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// GreeterServer is the server API for Greeter service.
-// All implementations must embed UnimplementedGreeterServer
+func (c *tickerClient) RequestVote(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error) {
+	out := new(TickResponse)
+	err := c.cc.Invoke(ctx, "/protobuf.Ticker/RequestVote", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// TickerServer is the server API for Ticker service.
+// All implementations must embed UnimplementedTickerServer
 // for forward compatibility
-type GreeterServer interface {
-	// Sends a greeting
-	SayHello(context.Context, *HelloRequest) (*HelloReply, error)
-	mustEmbedUnimplementedGreeterServer()
+type TickerServer interface {
+	// AppendEntry is the function that the Leader sent to followers to sync
+	// data and keep leadership.
+	AppendEntry(context.Context, *TickRequest) (*TickResponse, error)
+	// RequestVote is the function that the Candidate sent to followers to
+	// requests their votes for leader election.
+	RequestVote(context.Context, *TickRequest) (*TickResponse, error)
+	mustEmbedUnimplementedTickerServer()
 }
 
-// UnimplementedGreeterServer must be embedded to have forward compatible implementations.
-type UnimplementedGreeterServer struct {
+// UnimplementedTickerServer must be embedded to have forward compatible implementations.
+type UnimplementedTickerServer struct {
 }
 
-func (UnimplementedGreeterServer) SayHello(context.Context, *HelloRequest) (*HelloReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SayHello not implemented")
+func (UnimplementedTickerServer) AppendEntry(context.Context, *TickRequest) (*TickResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AppendEntry not implemented")
 }
-func (UnimplementedGreeterServer) mustEmbedUnimplementedGreeterServer() {}
+func (UnimplementedTickerServer) RequestVote(context.Context, *TickRequest) (*TickResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestVote not implemented")
+}
+func (UnimplementedTickerServer) mustEmbedUnimplementedTickerServer() {}
 
-// UnsafeGreeterServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to GreeterServer will
+// UnsafeTickerServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to TickerServer will
 // result in compilation errors.
-type UnsafeGreeterServer interface {
-	mustEmbedUnimplementedGreeterServer()
+type UnsafeTickerServer interface {
+	mustEmbedUnimplementedTickerServer()
 }
 
-func RegisterGreeterServer(s grpc.ServiceRegistrar, srv GreeterServer) {
-	s.RegisterService(&Greeter_ServiceDesc, srv)
+func RegisterTickerServer(s grpc.ServiceRegistrar, srv TickerServer) {
+	s.RegisterService(&Ticker_ServiceDesc, srv)
 }
 
-func _Greeter_SayHello_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HelloRequest)
+func _Ticker_AppendEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TickRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(GreeterServer).SayHello(ctx, in)
+		return srv.(TickerServer).AppendEntry(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/protobuf.Greeter/SayHello",
+		FullMethod: "/protobuf.Ticker/AppendEntry",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(GreeterServer).SayHello(ctx, req.(*HelloRequest))
+		return srv.(TickerServer).AppendEntry(ctx, req.(*TickRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// Greeter_ServiceDesc is the grpc.ServiceDesc for Greeter service.
+func _Ticker_RequestVote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TickRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TickerServer).RequestVote(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/protobuf.Ticker/RequestVote",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TickerServer).RequestVote(ctx, req.(*TickRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// Ticker_ServiceDesc is the grpc.ServiceDesc for Ticker service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var Greeter_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "protobuf.Greeter",
-	HandlerType: (*GreeterServer)(nil),
+var Ticker_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "protobuf.Ticker",
+	HandlerType: (*TickerServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "SayHello",
-			Handler:    _Greeter_SayHello_Handler,
+			MethodName: "AppendEntry",
+			Handler:    _Ticker_AppendEntry_Handler,
+		},
+		{
+			MethodName: "RequestVote",
+			Handler:    _Ticker_RequestVote_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
