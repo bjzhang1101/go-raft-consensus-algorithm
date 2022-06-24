@@ -14,7 +14,8 @@ dependencies:
 
 .PHONY: docker-build
 docker-build:
-	@docker build --rm -t raft:$(TAG) .
+	@eval $(minikube docker-env)
+	@docker build --rm -t raft:$(tag) .
 
 .PHONY: fmt
 fmt: dependencies
