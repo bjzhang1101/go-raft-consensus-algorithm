@@ -20,9 +20,10 @@ $ minikube start
 $ make docker-build tag=0.0.1 
 ```
 
-3. Apply the `k8s-resources.yaml` manifests
+3. Apply the Kubernetes manifests for the Raft cluster
 ```bash
-$ kubectl apply -f k8s-resources.yaml --context minikube 
+# It includes 3 nodes right now.
+$ kubectl apply -f k8s-manifests/ --context minikube 
 ```
 
 4. Verify the raft pod is bootstrapped and able to serve traffic
