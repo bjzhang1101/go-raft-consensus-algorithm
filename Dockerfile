@@ -5,7 +5,7 @@ RUN mkdir -p /build/
 COPY . /raft
 WORKDIR /raft
 
-RUN GOOS=linux GOARCH=amd64 go build -o /build/raft /raft/main.go
+RUN GOOS=linux GOARCH=amd64 go build -o /build/raft /raft/*.go
 
 FROM ubuntu:jammy
 

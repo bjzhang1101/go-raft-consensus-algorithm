@@ -1,4 +1,4 @@
-package server
+package http
 
 import (
 	"github.com/valyala/fasthttp"
@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	ClientPort = 8080
+	DefaultPort = 8080
 
 	contentType = "application/json"
 
@@ -15,17 +15,21 @@ const (
 	// Server rejects requests with bodies exceeding this limit.
 	maxRequestBodySize = 4 * 1024 * 1024
 
-	statusPath = "/status"
+	statusPath = "/state"
+
+	grpcPath = "/grpc"
 )
 
 // NewServer creates an HTTP server serving requests.
-func NewServer(node *node.Node) (*fasthttp.Server, error) {
+func NewServer(node *node.Node, ip string) *fasthttp.Server {
 	handler := NewHandler(node)
 
 	h := func(ctx *fasthttp.RequestCtx) {
 		switch p := string(ctx.Path()); p {
 		case statusPath:
-			handler.HandleStatus(ctx)
+			handler.HandleState(ctx)
+		case grpcPath:
+			handler.HandlerGRPC(ctx, ip)
 		default:
 			handler.HandleBlackHole(ctx)
 		}
@@ -35,5 +39,5 @@ func NewServer(node *node.Node) (*fasthttp.Server, error) {
 		Handler:            h,
 		MaxRequestBodySize: maxRequestBodySize,
 	}
-	return &s, nil
+	return &s
 }

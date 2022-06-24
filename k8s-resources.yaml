@@ -52,6 +52,7 @@ spec:
           name: raft
           ports:
             - containerPort: 8080
+            - containerPort: 8081
           volumeMounts:
             - mountPath: /tmp
               name: raft-configmap-volume
@@ -73,6 +74,10 @@ spec:
       port: 8080
       protocol: TCP
       targetPort: 8080
+    - name: grpc-8081
+      port: 8081
+      protocol: TCP
+      targetPort: 8081
   selector:
     app: raft
   type: ClusterIP

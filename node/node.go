@@ -170,11 +170,6 @@ func (n *Node) startLeader(ctx context.Context) error {
 }
 
 func (n *Node) requestVote(ctx context.Context) (int, error) {
-	n.SetState(Candidate)
-
-	// Refresh election timeout.
-	n.SetElectionTimeout()
-
 	votes := 1
 
 	// TODO: update the RPC request to async.
