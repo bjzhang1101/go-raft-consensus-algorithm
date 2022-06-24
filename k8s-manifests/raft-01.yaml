@@ -1,45 +1,35 @@
 ---
 apiVersion: v1
-kind: Namespace
-metadata:
-  labels:
-    app: raft
-  name: raft
-  namespace: raft
----
-apiVersion: v1
 data:
   config.yaml: |
-    id: 127.0.0.1
+    id: raft-01.raft.svc.cluster.local
     quorum:
-      - 127.0.0.1
-      - 127.0.0.2
-      - 127.0.0.3
-      - 127.0.0.4
-      - 127.0.0.5
+      - raft-01.raft.svc.cluster.local
+      - raft-02.raft.svc.cluster.local
+      - raft-03.raft.svc.cluster.local
 kind: ConfigMap
 metadata:
   labels:
-    app: raft
-  name: raft-config
+    app: raft-01
+  name: raft-config-01
   namespace: raft
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: raft
-  name: raft
+    app: raft-01
+  name: raft-01
   namespace: raft
 spec:
   revisionHistoryLimit: 1
   selector:
     matchLabels:
-      app: raft
+      app: raft-01
   template:
     metadata:
       labels:
-        app: raft
+        app: raft-01
     spec:
       containers:
         - args:
@@ -58,15 +48,15 @@ spec:
               name: raft-configmap-volume
       volumes:
         - configMap:
-            name: raft-config
+            name: raft-config-01
           name: raft-configmap-volume
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
-    app: raft
-  name: raft
+    app: raft-01
+  name: raft-01
   namespace: raft
 spec:
   ports:
@@ -79,5 +69,5 @@ spec:
       protocol: TCP
       targetPort: 8081
   selector:
-    app: raft
+    app: raft-01
   type: ClusterIP

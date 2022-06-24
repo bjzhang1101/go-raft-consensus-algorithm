@@ -21,6 +21,9 @@ docker-build:
 fmt: dependencies
 	@goimports -local=github.com/bjzhang1101/raft -w .
 
+.PHONY: kube-apply
+	@kubectl apply -f k8s-manifests
+
 .PHONY: tidy
 tidy:
 	@go mod tidy
