@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/bjzhang1101/raft/grpc/protobuf"
+)
+
+const (
+	connTimeout = 500 * time.Millisecond
 )
 
 // Client is a gRPC client for a Raft node.
@@ -25,9 +30,12 @@ func (c *Client) GetAddress() string {
 }
 
 // NewClient returns a new gRPC client sending ticks between Raft nodes.
+//
+// TODO: set conn and req timeout.
 func NewClient(a string, p int) *Client {
 	log.Printf("starting new gRPC client to %s:%d", a, p)
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", a, p), grpc.WithTransportCredentials(insecure.NewCredentials()))
+
 	if err != nil {
 		log.Fatalf("did not connect: %v", err)
 	}
@@ -62,7 +70,7 @@ func (c *Client) AppendEntry(ctx context.Context, id string, term int, data stri
 // RequestVote is the function that the Candidate sent to followers to
 // requests their votes for leader election.
 func (c *Client) RequestVote(ctx context.Context, id string, term int, data string) bool {
-	log.Println("sending request vote request")
+	log.Printf("node %s sending request vote request", id)
 	r, err := c.c.RequestVote(ctx, &pb.TickRequest{
 		Id:   id,
 		Term: int32(term),
