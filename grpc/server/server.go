@@ -36,14 +36,18 @@ func (s *Server) AppendEntry(ctx context.Context, in *pb.TickRequest) (*pb.TickR
 	term := int(in.GetTerm())
 	log.Printf("processing append entry request - id: %s, term: %d, data: %s", in.GetId(), term, in.GetData())
 
-	s.node.AppendEntryC(in.GetData())
-
 	if s.node.GetCurTerm() > term {
 		return &pb.TickResponse{Accept: false}, nil
-	} else {
-		s.node.SetCurTerm(term)
-		return &pb.TickResponse{Accept: true}, nil
 	}
+
+	if len(in.GetData()) > 0 {
+		s.node.AppendEntryC(in.GetData())
+	} else {
+		s.node.AppendTickC()
+	}
+
+	s.node.SetCurTerm(term)
+	return &pb.TickResponse{Accept: true}, nil
 }
 
 // RequestVote implemented ticker.RequestVote.
@@ -51,12 +55,18 @@ func (s *Server) RequestVote(ctx context.Context, in *pb.TickRequest) (*pb.TickR
 	term := int(in.GetTerm())
 	log.Printf("processing request vote request - id: %s, term: %d, data: %s", in.GetId(), term, in.GetData())
 
-	s.node.AppendEntryC(in.GetData())
+	// If a Follower has the same term with Candidate, this most likely means
+	// they are all requesting votes for leader election.
+	if s.node.GetCurTerm() >= term {
+		return &pb.TickResponse{Accept: false}, nil
+	}
 
 	if _, ok := s.node.GetVotedPerTerm()[term]; ok {
 		return &pb.TickResponse{Accept: false}, nil
-	} else {
-		s.node.SetVotedForTerm(term)
-		return &pb.TickResponse{Accept: true}, nil
 	}
+
+	s.node.SetVotedForTerm(term)
+	s.node.AppendTickC()
+	s.node.SetCurTerm(term)
+	return &pb.TickResponse{Accept: true}, nil
 }

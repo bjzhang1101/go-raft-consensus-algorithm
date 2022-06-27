@@ -15,6 +15,8 @@ const (
 	jitterElectionTimeoutMs = 5000
 
 	tickInterval = 2500 * time.Millisecond
+
+	grpcReqTimeout = 500 * time.Millisecond
 )
 
 // Node includes all the metadata of a node.
@@ -49,6 +51,9 @@ type Node struct {
 	// EntryC is the channel for received entries.
 	EntryC chan string
 
+	// TickC is the channel for empty entries.
+	TickC chan struct{}
+
 	// VotedPerTerm indicates whether the follower votes to any Candidate in
 	// a specific term.
 	VotedPerTerm map[int]struct{}
@@ -82,6 +87,7 @@ func NewNode(id string, quorum []string, grpcClientPort int) *Node {
 
 	n.VotedPerTerm = make(map[int]struct{})
 	n.EntryC = make(chan string)
+	n.TickC = make(chan struct{})
 	return &n
 }
 
@@ -136,6 +142,11 @@ func (n *Node) AppendEntryC(data string) {
 	n.EntryC <- data
 }
 
+// AppendTickC appends the tick channel with empty data.
+func (n *Node) AppendTickC() {
+	n.TickC <- struct{}{}
+}
+
 // Start is the main goroutine for a node's main functionality.
 func (n *Node) Start(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
@@ -152,6 +163,7 @@ func (n *Node) Start(ctx context.Context) <-chan struct{} {
 		}
 
 		if err != nil {
+			n.SetState(Down)
 			close(done)
 			return done
 		}
@@ -160,6 +172,8 @@ func (n *Node) Start(ctx context.Context) <-chan struct{} {
 
 func (n *Node) startFollower(ctx context.Context) error {
 	log.Printf("node %s became Follower", n.ID)
+	n.resetFollower(ctx)
+
 	for {
 		select {
 		case <-time.After(n.ElectionTimeout):
@@ -168,25 +182,27 @@ func (n *Node) startFollower(ctx context.Context) error {
 		case data := <-n.EntryC:
 			n.SetElectionTimeout()
 			log.Printf("node %s received data %s", n.ID, data)
+		case <-n.TickC:
+			n.SetElectionTimeout()
 		}
 	}
+}
+
+// resetFollower reset follower attributes so that it come up with a fresh
+// state.
+func (n *Node) resetFollower(ctx context.Context) {
+	n.EntryC = make(chan string)
+	n.TickC = make(chan struct{})
+	n.SetElectionTimeout()
 }
 
 func (n *Node) startCandidate(ctx context.Context) error {
 	log.Printf("node %s became Candidate", n.ID)
 
-	n.SetElectionTimeout()
 	n.IncrementCurTerm()
 	n.SetVotedForTerm(n.GetCurTerm())
 
-	votes, err := n.requestVote(ctx)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("node %s receives %d votes in term %d", n.ID, votes, n.GetCurTerm())
-
-	if votes > len(n.Quorum)/2 {
+	if n.requestVote(ctx) {
 		n.SetState(Leader)
 	} else {
 		n.SetState(Follower)
@@ -201,33 +217,60 @@ func (n *Node) startLeader(ctx context.Context) error {
 	for {
 		select {
 		case <-time.After(tickInterval):
-			if err := n.appendEntries(ctx, "this is a heartbeat"); err != nil {
-				log.Fatalf("node %s failed to send tick", n.ID)
+			if accepted := n.appendEntries(ctx, ""); !accepted {
+				log.Printf("node %s got rejected by followers", n.ID)
+				n.SetState(Follower)
+			} else {
+				log.Printf("node %s successfully sent heartbeats to all followers", n.ID)
 			}
 		}
 	}
 }
 
-func (n *Node) requestVote(ctx context.Context) (int, error) {
+func (n *Node) requestVote(ctx context.Context) bool {
 	votes := 1
+	q := len(n.Quorum)
 
 	for _, c := range n.TickClients {
-		accepted := c.RequestVote(ctx, n.GetID(), n.GetCurTerm(), "this is a request vote request")
-		log.Printf("node %s votes for %v", c.GetAddress(), accepted)
+		reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
 
-		if accepted {
-			votes++
+		accepted, err := c.RequestVote(reqCtx, n.GetID(), n.GetCurTerm(), "this is a request vote request")
+		if err != nil {
+			log.Printf("node %s received error vote response from %s in term %d, consider it as Down", n.GetID(), c.GetAddress(), n.GetCurTerm())
+			q--
+		} else {
+			log.Printf("node %s received votes %v from %s in term %d", n.GetID(), accepted, c.GetAddress(), n.GetCurTerm())
+
+			if accepted {
+				votes++
+			}
+		}
+
+		cancel()
+		if votes > len(n.Quorum)/2 {
+			return true
 		}
 	}
 
-	return votes, nil
+	return false
 }
 
-func (n *Node) appendEntries(ctx context.Context, data string) error {
+func (n *Node) appendEntries(ctx context.Context, data string) bool {
 	for _, c := range n.TickClients {
-		resp := c.AppendEntry(ctx, n.GetID(), n.GetCurTerm(), data)
-		log.Printf("receive heartbeat response %s from %s in term %d", resp, c.GetAddress(), n.GetCurTerm())
-	}
+		reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
 
-	return nil
+		resp, err := c.AppendEntry(reqCtx, n.GetID(), n.GetCurTerm(), data)
+		if err != nil {
+			log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
+		} else {
+			log.Printf("receive heartbeat response %v from %s in term %d", resp, c.GetAddress(), n.GetCurTerm())
+		}
+
+		cancel()
+
+		if !resp {
+			return false
+		}
+	}
+	return true
 }
