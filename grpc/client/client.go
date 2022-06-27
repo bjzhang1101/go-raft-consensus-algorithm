@@ -4,16 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/bjzhang1101/raft/grpc/protobuf"
-)
-
-const (
-	connTimeout = 500 * time.Millisecond
 )
 
 // Client is a gRPC client for a Raft node.
@@ -30,8 +25,6 @@ func (c *Client) GetAddress() string {
 }
 
 // NewClient returns a new gRPC client sending ticks between Raft nodes.
-//
-// TODO: set conn and req timeout.
 func NewClient(a string, p int) *Client {
 	log.Printf("starting new gRPC client to %s:%d", a, p)
 	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", a, p), grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -52,7 +45,7 @@ func NewClient(a string, p int) *Client {
 
 // AppendEntry is the function that the Leader sent to followers to sync
 // data and keep leadership.
-func (c *Client) AppendEntry(ctx context.Context, id string, term int, data string) string {
+func (c *Client) AppendEntry(ctx context.Context, id string, term int, data string) (bool, error) {
 	log.Println("sending append entry request")
 	r, err := c.c.AppendEntry(ctx, &pb.TickRequest{
 		Id:   id,
@@ -61,15 +54,15 @@ func (c *Client) AppendEntry(ctx context.Context, id string, term int, data stri
 	})
 
 	if err != nil {
-		log.Fatalf("failed to append entry: %v", err)
+		return true, fmt.Errorf("failed to append entry: %v", err)
 	}
 
-	return fmt.Sprintf("accept: %v", r.GetAccept())
+	return r.GetAccept(), nil
 }
 
 // RequestVote is the function that the Candidate sent to followers to
 // requests their votes for leader election.
-func (c *Client) RequestVote(ctx context.Context, id string, term int, data string) bool {
+func (c *Client) RequestVote(ctx context.Context, id string, term int, data string) (bool, error) {
 	log.Printf("node %s sending request vote request", id)
 	r, err := c.c.RequestVote(ctx, &pb.TickRequest{
 		Id:   id,
@@ -78,8 +71,8 @@ func (c *Client) RequestVote(ctx context.Context, id string, term int, data stri
 	})
 
 	if err != nil {
-		log.Fatalf("failed to request vote: %v", err)
+		return false, fmt.Errorf("failed to request vote: %v", err)
 	}
 
-	return r.GetAccept()
+	return r.GetAccept(), nil
 }
