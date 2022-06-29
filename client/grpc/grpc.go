@@ -1,4 +1,4 @@
-package client
+package grpc
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	pb "github.com/bjzhang1101/raft/grpc/protobuf"
+	pb "github.com/bjzhang1101/raft/protobuf"
 )
 
 // Client is a gRPC client for a Raft node.
@@ -45,29 +45,38 @@ func NewClient(a string, p int) *Client {
 
 // AppendEntry is the function that the Leader sent to followers to sync
 // data and keep leadership.
-func (c *Client) AppendEntry(ctx context.Context, id string, term int, data string) (bool, error) {
-	log.Println("sending append entry request")
+func (c *Client) AppendEntry(ctx context.Context, id string, term int, action pb.Entry_Action, k, v string) (bool, int, error) {
+	log.Printf("sending append entry request with action %v", action)
+
+	entry := pb.Entry{
+		Term:   int32(term),
+		Key:    k,
+		Value:  v,
+		Action: action,
+	}
+
 	r, err := c.c.AppendEntry(ctx, &pb.TickRequest{
-		Id:   id,
-		Term: int32(term),
-		Data: data,
+		Id:    id,
+		Entry: &entry,
 	})
 
 	if err != nil {
-		return true, fmt.Errorf("failed to append entry: %v", err)
+		return true, int(r.GetTerm()), fmt.Errorf("failed to append entry: %v", err)
 	}
 
-	return r.GetAccept(), nil
+	return r.GetAccept(), int(r.GetTerm()), nil
 }
 
 // RequestVote is the function that the Candidate sent to followers to
 // requests their votes for leader election.
-func (c *Client) RequestVote(ctx context.Context, id string, term int, data string) (bool, error) {
+func (c *Client) RequestVote(ctx context.Context, id string, term int) (bool, error) {
 	log.Printf("node %s sending request vote request", id)
+
+	entry := pb.Entry{Term: int32(term)}
+
 	r, err := c.c.RequestVote(ctx, &pb.TickRequest{
-		Id:   id,
-		Term: int32(term),
-		Data: data,
+		Id:    id,
+		Entry: &entry,
 	})
 
 	if err != nil {

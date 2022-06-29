@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/pflag"
 
-	grpc "github.com/bjzhang1101/raft/grpc/server"
-	"github.com/bjzhang1101/raft/http"
 	"github.com/bjzhang1101/raft/node"
+	"github.com/bjzhang1101/raft/server/grpc"
+	"github.com/bjzhang1101/raft/server/http"
 )
 
 var (

@@ -1,4 +1,4 @@
-package server
+package grpc
 
 import (
 	"context"
@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/grpc"
 
-	pb "github.com/bjzhang1101/raft/grpc/protobuf"
 	"github.com/bjzhang1101/raft/node"
+	pb "github.com/bjzhang1101/raft/protobuf"
 )
 
 const (
@@ -33,40 +33,41 @@ func NewServer(node *node.Node) *grpc.Server {
 
 // AppendEntry implemented ticker.AppendEntry.
 func (s *Server) AppendEntry(ctx context.Context, in *pb.TickRequest) (*pb.TickResponse, error) {
-	term := int(in.GetTerm())
-	log.Printf("processing append entry request - id: %s, term: %d, data: %s", in.GetId(), term, in.GetData())
+	entry := in.GetEntry()
+	term := int(entry.GetTerm())
+	log.Printf("processing append entry request - id: %s, term: %d, action: %s", in.GetId(), term, entry.GetAction())
 
 	if s.node.GetCurTerm() > term {
-		return &pb.TickResponse{Accept: false}, nil
+		return &pb.TickResponse{Accept: false, Term: int32(s.node.GetCurTerm())}, nil
 	}
 
-	if len(in.GetData()) > 0 {
-		s.node.AppendEntryC(in.GetData())
-	} else {
+	if in.GetEntry().GetAction() == pb.Entry_Tick {
 		s.node.AppendTickC()
+	} else {
+		s.node.AppendEntryC(node.NewEntry(entry.Action, entry.GetKey(), entry.GetValue(), term))
 	}
 
 	s.node.SetCurTerm(term)
-	return &pb.TickResponse{Accept: true}, nil
+	s.node.SetCurLeader(in.GetId())
+	return &pb.TickResponse{Accept: true, Term: int32(s.node.GetCurTerm())}, nil
 }
 
 // RequestVote implemented ticker.RequestVote.
 func (s *Server) RequestVote(ctx context.Context, in *pb.TickRequest) (*pb.TickResponse, error) {
-	term := int(in.GetTerm())
-	log.Printf("processing request vote request - id: %s, term: %d, data: %s", in.GetId(), term, in.GetData())
+	term := int(in.GetEntry().GetTerm())
+	log.Printf("processing request vote request - id: %s, term: %d, action: %s", in.GetId(), term, in.GetEntry().GetAction())
 
 	// If a Follower has the same term with Candidate, this most likely means
 	// they are all requesting votes for leader election.
 	if s.node.GetCurTerm() >= term {
-		return &pb.TickResponse{Accept: false}, nil
+		return &pb.TickResponse{Accept: false, Term: int32(s.node.GetCurTerm())}, nil
 	}
 
 	if _, ok := s.node.GetVotedPerTerm()[term]; ok {
-		return &pb.TickResponse{Accept: false}, nil
+		return &pb.TickResponse{Accept: false, Term: int32(s.node.GetCurTerm())}, nil
 	}
 
 	s.node.SetVotedForTerm(term)
 	s.node.AppendTickC()
-	s.node.SetCurTerm(term)
-	return &pb.TickResponse{Accept: true}, nil
+	return &pb.TickResponse{Accept: true, Term: int32(s.node.GetCurTerm())}, nil
 }

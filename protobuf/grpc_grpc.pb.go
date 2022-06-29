@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v3.19.4
-// source: grpc/protobuf/grpc.proto
+// source: protobuf/grpc.proto
 
 package protobuf
 
@@ -146,5 +146,5 @@ var Ticker_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "grpc/protobuf/grpc.proto",
+	Metadata: "protobuf/grpc.proto",
 }

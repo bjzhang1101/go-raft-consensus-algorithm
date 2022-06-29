@@ -23,7 +23,7 @@ $ make docker-build tag=0.0.1
 3. Apply the Kubernetes manifests for the Raft cluster
 ```bash
 # It includes 3 nodes right now.
-$ kubectl apply -f k8s-manifests/ --context minikube 
+$ kubectl apply -f demo/ --context minikube 
 ```
 
 4. Verify the raft pod is bootstrapped and able to serve traffic
