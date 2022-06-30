@@ -1,3 +1,17 @@
+// Package node is the package that defines all behaviors of a Raft node.
+//
+// Behavior of Follower:
+//
+// Behavior of Candidate:
+//
+// Behavior of Leader:
+// 1.The leader receives clients' requests that contains a command to be
+//   executed by the replicated state machines.
+// 2.The leader appends the command to its log as a new entry.
+// 3.The leader issues AppendEntries RPC calls in parallel to its followers.
+// 4.Once the entry is safely replicated, the leader applies the entry to its
+//   state machine.
+// 5.After the entry is applied, the leader respond to the client.
 package node
 
 import (
@@ -9,6 +23,7 @@ import (
 	"time"
 
 	"github.com/bjzhang1101/raft/client/grpc"
+	pb "github.com/bjzhang1101/raft/protobuf"
 )
 
 const (
@@ -18,6 +33,9 @@ const (
 	tickInterval = 2500 * time.Millisecond
 
 	grpcReqTimeout = 500 * time.Millisecond
+
+	// applyInterval is the interval between each apply operation.
+	applyInterval = 1000 * time.Millisecond
 )
 
 // Node includes all the metadata of a node.
@@ -42,7 +60,7 @@ type Node struct {
 	CurTerm int
 
 	// Log is the list of all stored log entries.
-	Logs []Entry
+	Logs []*pb.Entry
 
 	// Data is the node's data store.
 	//
@@ -66,6 +84,10 @@ type Node struct {
 	LeaderAttr *LeaderAttributes
 }
 
+// FollowerAttributes is the follower attributes.
+//
+// TODO: this is most likely useless. Both CurLeader and ElectionTimeout
+// can be moved into Node.
 type FollowerAttributes struct {
 	// CurLeader is the current leader of the quorum.
 	CurLeader string
@@ -74,12 +96,6 @@ type FollowerAttributes struct {
 	// (or restart for Candidate) leader election if it receives no
 	// communication over the period of time.
 	ElectionTimeout time.Duration
-
-	// EntryC is the channel for received entries.
-	EntryC chan Entry
-
-	// TickC is the channel for empty entries.
-	TickC chan struct{}
 }
 
 type LeaderAttributes struct {
@@ -98,7 +114,8 @@ type LeaderAttributes struct {
 func NewNode(id string, quorum []string, grpcClientPort int) *Node {
 	log.Printf("initializing raft node %s", id)
 
-	var logs []Entry
+	// The first index for the meaningful log is 1 instead of 0.
+	logs := []*pb.Entry{nil}
 	data := make(map[string]string)
 	n := Node{
 		ID:      id,
@@ -111,15 +128,7 @@ func NewNode(id string, quorum []string, grpcClientPort int) *Node {
 
 	n.VotedPerTerm = make(map[int]struct{})
 
-	entryC := make(chan Entry)
-	tickC := make(chan struct{})
-
-	fa := FollowerAttributes{
-		EntryC: entryC,
-		TickC:  tickC,
-	}
-
-	n.FollowerAttr = &fa
+	n.FollowerAttr = &FollowerAttributes{}
 
 	rand.Seed(time.Now().UnixNano())
 	n.SetElectionTimeout()
@@ -183,6 +192,37 @@ func (n *Node) SetCurLeader(s string) {
 	n.FollowerAttr.CurLeader = s
 }
 
+// GetLogAction returns the action for the logs[idx].
+//
+// This function assumes idx is always valid.
+func (n *Node) GetLogAction(idx int) pb.Entry_Action {
+	return n.Logs[idx].Action
+}
+
+// GetLogKey returns the key for the logs[idx].
+//
+// This function assumes idx is always valid.
+func (n *Node) GetLogKey(idx int) string {
+	return n.Logs[idx].Key
+}
+
+// GetLogValue returns the value for the logs[idx].
+//
+// This function assumes idx is always valid.
+func (n *Node) GetLogValue(idx int) string {
+	return n.Logs[idx].Value
+}
+
+// AppendLogs appends logs with the given entry.
+func (n *Node) AppendLogs(entry *pb.Entry) error {
+	if n.State != Leader {
+		return fmt.Errorf("append logs operation only allowed for Leader")
+	}
+
+	n.Logs = append(n.Logs, entry)
+	return nil
+}
+
 // GetAllData returns a copy of all data of the node.
 func (n *Node) GetAllData() map[string]string {
 	d := n.Data
@@ -210,14 +250,9 @@ func (n *Node) SetVotedForTerm(term int) {
 	n.VotedPerTerm[term] = struct{}{}
 }
 
-// AppendEntryC appends the entry channel with the data.
-func (n *Node) AppendEntryC(entry Entry) {
-	n.FollowerAttr.EntryC <- entry
-}
-
-// AppendTickC appends the tick channel with empty data.
-func (n *Node) AppendTickC() {
-	n.FollowerAttr.TickC <- struct{}{}
+// SetCommitIdx sets the commit index for the node.
+func (n *Node) SetCommitIdx(idx int) {
+	n.CommitIdx = idx
 }
 
 // Start is the main goroutine for a node's main functionality.
@@ -243,30 +278,42 @@ func (n *Node) Start(ctx context.Context) <-chan struct{} {
 	}
 }
 
+// Apply applies committed logs.
+//
+// TODO: this should be able to put in the Start() goroutine.
+func (n *Node) Apply(ctx context.Context) {
+	for {
+		select {
+		case <-time.After(applyInterval):
+			if n.CommitIdx > n.LastApplied {
+				for i := n.LastApplied + 1; i <= n.CommitIdx; i++ {
+					action := n.GetLogAction(i)
+					key := n.GetLogKey(i)
+					value := n.GetLogValue(i)
+
+					if err := n.apply(action, key, value); err != nil {
+						log.Printf("failed to apply operation %s for key: %s, value: %s", action, key, value)
+						break
+					}
+					log.Printf("applied operation %s for key: %s, value: %s", action, key, value)
+					n.LastApplied++
+				}
+			}
+		}
+	}
+}
+
 func (n *Node) startFollower(ctx context.Context) error {
 	log.Printf("node %s became Follower", n.ID)
-	n.resetFollower(ctx)
+	n.SetElectionTimeout()
 
 	for {
 		select {
 		case <-time.After(n.FollowerAttr.ElectionTimeout):
 			n.SetState(Candidate)
 			return nil
-		case data := <-n.FollowerAttr.EntryC:
-			n.SetElectionTimeout()
-			log.Printf("node %s received data %s", n.ID, data)
-		case <-n.FollowerAttr.TickC:
-			n.SetElectionTimeout()
 		}
 	}
-}
-
-// resetFollower reset follower attributes so that it come up with a fresh
-// state.
-func (n *Node) resetFollower(ctx context.Context) {
-	n.FollowerAttr.EntryC = make(chan Entry)
-	n.FollowerAttr.TickC = make(chan struct{})
-	n.SetElectionTimeout()
 }
 
 func (n *Node) startCandidate(ctx context.Context) error {
@@ -286,17 +333,39 @@ func (n *Node) startCandidate(ctx context.Context) error {
 
 func (n *Node) startLeader(ctx context.Context) error {
 	log.Printf("node %s became Leader", n.ID)
+	n.resetLeader(ctx)
 	n.SetCurLeader(n.GetID())
+
+	// Send a heartbeat immediately after a node is promoted to be a Leader.
+	if accepted, term := n.appendEntries(ctx, pb.Entry_Tick, "", ""); !accepted {
+		log.Printf("node %s got rejected by followers", n.ID)
+		n.SetState(Follower)
+		n.SetCurTerm(term)
+		return nil
+	}
 
 	for {
 		select {
 		case <-time.After(tickInterval):
-			if accepted := n.appendEntries(ctx, Action_Tick, "", ""); !accepted {
+			if accepted, term := n.appendEntries(ctx, pb.Entry_Tick, "", ""); !accepted {
 				log.Printf("node %s got rejected by followers", n.ID)
 				n.SetState(Follower)
+				n.SetCurTerm(term)
 				return nil
 			}
 		}
+	}
+}
+
+func (n *Node) resetLeader(ctx context.Context) {
+	n.LeaderAttr.NextIdx = make(map[string]int)
+	n.LeaderAttr.MatchIdx = make(map[string]int)
+
+	for _, member := range n.Quorum {
+		// Initialized to leader last log index + 1.
+		n.LeaderAttr.NextIdx[member] = len(n.Logs)
+		// // Initialized to 0.
+		n.LeaderAttr.MatchIdx[member] = 0
 	}
 }
 
@@ -328,17 +397,79 @@ func (n *Node) requestVote(ctx context.Context) bool {
 	return false
 }
 
-func (n *Node) appendEntries(ctx context.Context, action Action, k, v string) bool {
+func (n *Node) sendHeartbeat(ctx context.Context, c *grpc.Client) (bool, int) {
+	reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
+	defer cancel()
+
+	curTerm := n.GetCurTerm()
+
+	_, term, err := c.AppendEntries(reqCtx, n.GetID(), curTerm, nil)
+	if err != nil {
+		log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
+	}
+
+	if curTerm < term {
+		return false, term
+	}
+
+	return true, n.GetCurTerm()
+}
+
+func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) (bool, int) {
+	follower := c.GetAddress()
+
+	// TODO: this part need a careful revisit tomorrow.
+	if len(n.Logs) < n.LeaderAttr.NextIdx[follower] {
+		return n.sendHeartbeat(ctx, c)
+	}
+
+	var entries []*pb.Entry
+	prevLogIdx := n.LeaderAttr.NextIdx[follower] - 1
+	var prevLogTerm int
+	if prevLogIdx != 0 {
+		n.Logs[prevLogIdx]
+	}
+	for i := n.LeaderAttr.NextIdx[follower]; i < len(n.Logs); i++ {
+		entries = append(entries, &pb.Entry{
+			Key:    n.GetLogKey(i),
+			Value:  n.GetLogValue(i),
+			Action: n.GetLogAction(i),
+		})
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
+	defer cancel()
+
+	curTerm := n.GetCurTerm()
+	accepted, term, err := c.AppendEntries(reqCtx, n.GetID(), curTerm, nil)
+	if err != nil {
+		log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
+	}
+
+	if curTerm < term {
+		return false, term
+	}
+
+	// TODO: retry on accepted
+	if !accepted {
+
+	}
+
+	return true, n.GetCurTerm()
+
+}
+
+func (n *Node) appendEntriesForAllClient(ctx context.Context) (bool, int) {
 	for _, c := range n.LeaderAttr.TickClients {
 		reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
 
 		curTerm := n.GetCurTerm()
 
-		accepted, term, err := c.AppendEntry(reqCtx, n.GetID(), curTerm, action, k, v)
+		accepted, term, err := c.AppendEntries(reqCtx, n.GetID(), curTerm, action, k, v)
 
 		if curTerm < term {
 			cancel()
-			return false
+			return false, term
 		}
 
 		if err != nil {
@@ -348,40 +479,29 @@ func (n *Node) appendEntries(ctx context.Context, action Action, k, v string) bo
 		cancel()
 		if !accepted {
 			// TODO: Shouldn't return false, need retry.
-			return false
+			return false, term
 		}
 	}
-	return true
+	return true, n.GetCurTerm()
 }
 
-func (n *Node) applyInsert(k, v string) error {
-	if _, ok := n.Data[k]; ok {
-		return fmt.Errorf("duplicated key %s, use Update instead", k)
+func (n *Node) apply(action pb.Entry_Action, k, v string) error {
+	switch action {
+	case pb.Entry_Insert:
+		if _, ok := n.Data[k]; ok {
+			return fmt.Errorf("duplicated key %s, use Update instead", k)
+		}
+		n.Data[k] = v
+	case pb.Entry_Update:
+		if _, ok := n.Data[k]; !ok {
+			return fmt.Errorf("key %s not found, use Insert instead", k)
+		}
+		n.Data[k] = v
+	case pb.Entry_Delete:
+		if _, ok := n.Data[k]; !ok {
+			return fmt.Errorf("key %s not found", k)
+		}
+		delete(n.Data, k)
 	}
-	n.Data[k] = v
-	return nil
-}
-
-func (n *Node) applyGet(k string) (string, error) {
-	if v, ok := n.Data[k]; !ok {
-		return "", fmt.Errorf("key %s not found", k)
-	} else {
-		return v, nil
-	}
-}
-
-func (n *Node) applyUpdate(k, v string) error {
-	if _, ok := n.Data[k]; !ok {
-		return fmt.Errorf("key %s not found, use Insert instead", k)
-	}
-	n.Data[k] = v
-	return nil
-}
-
-func (n *Node) applyDelete(k string) error {
-	if _, ok := n.Data[k]; !ok {
-		return fmt.Errorf("key %s not found", k)
-	}
-	delete(n.Data, k)
 	return nil
 }

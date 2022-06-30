@@ -46,6 +46,11 @@ func main() {
 		nodeDone = n.Start(ctx)
 	}()
 
+	// Goroutine for apply logs.
+	go func() {
+		n.Apply(ctx)
+	}()
+
 	// Server to respond http requests.
 	httpServer := http.NewServer(n)
 	go func() {

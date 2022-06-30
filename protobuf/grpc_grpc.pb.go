@@ -8,7 +8,6 @@ package protobuf
 
 import (
 	context "context"
-
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
@@ -23,9 +22,9 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type TickerClient interface {
-	// AppendEntry is the function that the Leader sent to followers to sync
+	// AppendEntries is the function that the Leader sent to followers to sync
 	// data and keep leadership.
-	AppendEntry(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error)
+	AppendEntries(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error)
 	// RequestVote is the function that the Candidate sent to followers to
 	// requests their votes for leader election.
 	RequestVote(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error)
@@ -39,9 +38,9 @@ func NewTickerClient(cc grpc.ClientConnInterface) TickerClient {
 	return &tickerClient{cc}
 }
 
-func (c *tickerClient) AppendEntry(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error) {
+func (c *tickerClient) AppendEntries(ctx context.Context, in *TickRequest, opts ...grpc.CallOption) (*TickResponse, error) {
 	out := new(TickResponse)
-	err := c.cc.Invoke(ctx, "/protobuf.Ticker/AppendEntry", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/protobuf.Ticker/AppendEntries", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -61,9 +60,9 @@ func (c *tickerClient) RequestVote(ctx context.Context, in *TickRequest, opts ..
 // All implementations must embed UnimplementedTickerServer
 // for forward compatibility
 type TickerServer interface {
-	// AppendEntry is the function that the Leader sent to followers to sync
+	// AppendEntries is the function that the Leader sent to followers to sync
 	// data and keep leadership.
-	AppendEntry(context.Context, *TickRequest) (*TickResponse, error)
+	AppendEntries(context.Context, *TickRequest) (*TickResponse, error)
 	// RequestVote is the function that the Candidate sent to followers to
 	// requests their votes for leader election.
 	RequestVote(context.Context, *TickRequest) (*TickResponse, error)
@@ -74,8 +73,8 @@ type TickerServer interface {
 type UnimplementedTickerServer struct {
 }
 
-func (UnimplementedTickerServer) AppendEntry(context.Context, *TickRequest) (*TickResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method AppendEntry not implemented")
+func (UnimplementedTickerServer) AppendEntries(context.Context, *TickRequest) (*TickResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AppendEntries not implemented")
 }
 func (UnimplementedTickerServer) RequestVote(context.Context, *TickRequest) (*TickResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RequestVote not implemented")
@@ -93,20 +92,20 @@ func RegisterTickerServer(s grpc.ServiceRegistrar, srv TickerServer) {
 	s.RegisterService(&Ticker_ServiceDesc, srv)
 }
 
-func _Ticker_AppendEntry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Ticker_AppendEntries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(TickRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(TickerServer).AppendEntry(ctx, in)
+		return srv.(TickerServer).AppendEntries(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/protobuf.Ticker/AppendEntry",
+		FullMethod: "/protobuf.Ticker/AppendEntries",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TickerServer).AppendEntry(ctx, req.(*TickRequest))
+		return srv.(TickerServer).AppendEntries(ctx, req.(*TickRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -137,8 +136,8 @@ var Ticker_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*TickerServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "AppendEntry",
-			Handler:    _Ticker_AppendEntry_Handler,
+			MethodName: "AppendEntries",
+			Handler:    _Ticker_AppendEntries_Handler,
 		},
 		{
 			MethodName: "RequestVote",

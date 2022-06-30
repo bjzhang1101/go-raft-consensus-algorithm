@@ -43,21 +43,15 @@ func NewClient(a string, p int) *Client {
 	return &c
 }
 
-// AppendEntry is the function that the Leader sent to followers to sync
+// AppendEntries is the function that the Leader sent to followers to sync
 // data and keep leadership.
-func (c *Client) AppendEntry(ctx context.Context, id string, term int, action pb.Entry_Action, k, v string) (bool, int, error) {
-	log.Printf("sending append entry request with action %v", action)
+func (c *Client) AppendEntries(ctx context.Context, id string, term int, entries []*pb.Entry) (bool, int, error) {
+	log.Printf("sending append entry request with action in term %d", term)
 
-	entry := pb.Entry{
-		Term:   int32(term),
-		Key:    k,
-		Value:  v,
-		Action: action,
-	}
-
-	r, err := c.c.AppendEntry(ctx, &pb.TickRequest{
-		Id:    id,
-		Entry: &entry,
+	r, err := c.c.AppendEntries(ctx, &pb.TickRequest{
+		LeaderId:      id,
+		LeaderCurTerm: int32(term),
+		Entries:       entries,
 	})
 
 	if err != nil {
@@ -72,11 +66,9 @@ func (c *Client) AppendEntry(ctx context.Context, id string, term int, action pb
 func (c *Client) RequestVote(ctx context.Context, id string, term int) (bool, error) {
 	log.Printf("node %s sending request vote request", id)
 
-	entry := pb.Entry{Term: int32(term)}
-
 	r, err := c.c.RequestVote(ctx, &pb.TickRequest{
-		Id:    id,
-		Entry: &entry,
+		LeaderId:      id,
+		LeaderCurTerm: int32(term),
 	})
 
 	if err != nil {

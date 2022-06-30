@@ -4,10 +4,20 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/valyala/fasthttp"
 
 	"github.com/bjzhang1101/raft/node"
+)
+
+const (
+	applyStatusInterval = 1 * time.Second
+	requestTimeout      = 5 * time.Second
+)
+
+var (
+	counter = 1
 )
 
 // Handler handles HTTP requests to the server.
@@ -81,6 +91,9 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 	ctx.Response.Header.SetContentType(contentType)
 	ctx.SetStatusCode(fasthttp.StatusOK)
 
+	key := fmt.Sprintf("key-%d", counter)
+	value := fmt.Sprintf("value-%d", counter)
+
 	b := struct {
 		Success bool   `json:"success"`
 		Leader  string `json:"leader"`
@@ -90,13 +103,35 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 		b.Success = false
 		b.Leader = h.node.GetCurLeader()
 	} else {
-		entry := node.NewEntry(node.Action_Insert, "key-1", "value-1", h.node.GetCurTerm())
-		h.node.AppendEntryC(entry)
+		entry := node.NewEntry(node.Action_Insert, key, value, h.node.GetCurTerm())
+		if err := h.node.AppendLogs(entry); err != nil {
+			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+			return
+		}
+
+		b.Success = true
 	}
 
 	body, err := json.Marshal(b)
 	if err != nil {
 		ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+		return
 	}
 	ctx.SetBody(body)
+
+	for {
+		select {
+		case <-time.After(requestTimeout):
+			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+			// Is this necessary to add an entry to delete this data if timeout?
+			entry := node.NewEntry(node.Action_Delete, key, value, h.node.GetCurTerm())
+			h.node.AppendLogs(entry)
+			return
+		case <-time.After(applyStatusInterval):
+			if v := h.node.GetData(key); value == v {
+				counter++
+				return
+			}
+		}
+	}
 }

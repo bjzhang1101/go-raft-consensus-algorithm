@@ -31,31 +31,26 @@ func NewServer(node *node.Node) *grpc.Server {
 	return s
 }
 
-// AppendEntry implemented ticker.AppendEntry.
-func (s *Server) AppendEntry(ctx context.Context, in *pb.TickRequest) (*pb.TickResponse, error) {
-	entry := in.GetEntry()
-	term := int(entry.GetTerm())
-	log.Printf("processing append entry request - id: %s, term: %d, action: %s", in.GetId(), term, entry.GetAction())
+// AppendEntries implemented ticker.AppendEntries.
+func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.TickResponse, error) {
+	term := int(in.GetLeaderCurTerm())
+	log.Printf("processing append entry request - id: %s, term: %d", in.GetLeaderId(), term)
 
 	if s.node.GetCurTerm() > term {
 		return &pb.TickResponse{Accept: false, Term: int32(s.node.GetCurTerm())}, nil
 	}
 
-	if in.GetEntry().GetAction() == pb.Entry_Tick {
-		s.node.AppendTickC()
-	} else {
-		s.node.AppendEntryC(node.NewEntry(entry.Action, entry.GetKey(), entry.GetValue(), term))
-	}
-
+	s.node.SetElectionTimeout()
 	s.node.SetCurTerm(term)
-	s.node.SetCurLeader(in.GetId())
+	s.node.SetCurLeader(in.GetLeaderId())
+	s.node.SetCommitIdx(int(in.GetLeaderCommitIdx()))
 	return &pb.TickResponse{Accept: true, Term: int32(s.node.GetCurTerm())}, nil
 }
 
 // RequestVote implemented ticker.RequestVote.
 func (s *Server) RequestVote(ctx context.Context, in *pb.TickRequest) (*pb.TickResponse, error) {
-	term := int(in.GetEntry().GetTerm())
-	log.Printf("processing request vote request - id: %s, term: %d, action: %s", in.GetId(), term, in.GetEntry().GetAction())
+	term := int(in.GetLeaderCurTerm())
+	log.Printf("processing request vote request - id: %s, term: %d", in.GetLeaderId(), term)
 
 	// If a Follower has the same term with Candidate, this most likely means
 	// they are all requesting votes for leader election.
@@ -67,7 +62,7 @@ func (s *Server) RequestVote(ctx context.Context, in *pb.TickRequest) (*pb.TickR
 		return &pb.TickResponse{Accept: false, Term: int32(s.node.GetCurTerm())}, nil
 	}
 
+	s.node.SetElectionTimeout()
 	s.node.SetVotedForTerm(term)
-	s.node.AppendTickC()
 	return &pb.TickResponse{Accept: true, Term: int32(s.node.GetCurTerm())}, nil
 }
