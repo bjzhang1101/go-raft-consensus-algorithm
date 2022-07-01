@@ -16,7 +16,7 @@ message TickRequest {
   // prevLogIdx is the index of log entry immediately preceding new ones.
   int32 prevLogIdx = 4;
   // prevLogTerm is the term of the prevLogIdx entry.
-  string prevLogTerm = 5;
+  int32 prevLogTerm = 5;
   // entries is the list of entry that the Leader trying to make this Follower
   // replicated.
   repeated Entry entries = 6;

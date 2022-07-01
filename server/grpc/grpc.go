@@ -32,19 +32,49 @@ func NewServer(node *node.Node) *grpc.Server {
 }
 
 // AppendEntries implemented ticker.AppendEntries.
+//
+// If the leader's current term is smaller than the node's, reject the request
+// and return its current term.  If the follower does not find an entry in its
+// log with the same index and term, then it refuses the new entries.
 func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.TickResponse, error) {
-	term := int(in.GetLeaderCurTerm())
-	log.Printf("processing append entry request - id: %s, term: %d", in.GetLeaderId(), term)
+	leaderCurTerm := int(in.GetLeaderCurTerm())
+	curTerm := s.node.GetCurTerm()
+	log.Printf("processing append entry request - id: %s, term: %d", in.GetLeaderId(), leaderCurTerm)
 
-	if s.node.GetCurTerm() > term {
-		return &pb.TickResponse{Accept: false, Term: int32(s.node.GetCurTerm())}, nil
+	// Term check.
+	if curTerm > leaderCurTerm {
+		return &pb.TickResponse{Accept: false, Term: int32(curTerm)}, nil
 	}
 
 	s.node.SetElectionTimeout()
-	s.node.SetCurTerm(term)
+	s.node.SetCurTerm(leaderCurTerm)
 	s.node.SetCurLeader(in.GetLeaderId())
 	s.node.SetCommitIdx(int(in.GetLeaderCommitIdx()))
-	return &pb.TickResponse{Accept: true, Term: int32(s.node.GetCurTerm())}, nil
+
+	// Return directly for heartbeat.
+	if len(in.GetEntries()) == 0 {
+		return &pb.TickResponse{Accept: true, Term: int32(curTerm)}, nil
+	}
+
+	// Consistency check.
+	logs := s.node.GetLogs()
+	prevLogIdx := int(in.GetPrevLogIdx())
+
+	if len(logs) <= prevLogIdx {
+		return &pb.TickResponse{Accept: false, Term: int32(curTerm)}, nil
+	}
+
+	if logs[prevLogIdx].GetTerm() != in.GetPrevLogTerm() {
+		return &pb.TickResponse{Accept: false, Term: int32(curTerm)}, nil
+	}
+
+	// Override entries.
+	newLogs := logs[:prevLogIdx+1]
+	for _, e := range in.GetEntries() {
+		newLogs = append(newLogs, e)
+	}
+
+	return &pb.TickResponse{Accept: true, Term: int32(curTerm)}, nil
 }
 
 // RequestVote implemented ticker.RequestVote.

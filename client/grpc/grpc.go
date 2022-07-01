@@ -45,13 +45,16 @@ func NewClient(a string, p int) *Client {
 
 // AppendEntries is the function that the Leader sent to followers to sync
 // data and keep leadership.
-func (c *Client) AppendEntries(ctx context.Context, id string, term int, entries []*pb.Entry) (bool, int, error) {
+func (c *Client) AppendEntries(ctx context.Context, id string, term, commitIdx, prevLogIdx, prevLogTerm int32, entries []*pb.Entry) (bool, int, error) {
 	log.Printf("sending append entry request with action in term %d", term)
 
 	r, err := c.c.AppendEntries(ctx, &pb.TickRequest{
-		LeaderId:      id,
-		LeaderCurTerm: int32(term),
-		Entries:       entries,
+		LeaderId:        id,
+		LeaderCurTerm:   term,
+		LeaderCommitIdx: commitIdx,
+		PrevLogIdx:      prevLogIdx,
+		PrevLogTerm:     prevLogTerm,
+		Entries:         entries,
 	})
 
 	if err != nil {

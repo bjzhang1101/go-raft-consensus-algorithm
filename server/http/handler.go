@@ -8,6 +8,8 @@ import (
 
 	"github.com/valyala/fasthttp"
 
+	pb "github.com/bjzhang1101/raft/protobuf"
+
 	"github.com/bjzhang1101/raft/node"
 )
 
@@ -103,8 +105,13 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 		b.Success = false
 		b.Leader = h.node.GetCurLeader()
 	} else {
-		entry := node.NewEntry(node.Action_Insert, key, value, h.node.GetCurTerm())
-		if err := h.node.AppendLogs(entry); err != nil {
+		entry := pb.Entry{
+			Key:    key,
+			Value:  value,
+			Action: pb.Entry_Insert,
+			Term:   int32(h.node.GetCurTerm()),
+		}
+		if err := h.node.AppendLogs(&entry); err != nil {
 			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
 			return
 		}
@@ -123,9 +130,15 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 		select {
 		case <-time.After(requestTimeout):
 			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+
+			entry := pb.Entry{
+				Key:    key,
+				Value:  value,
+				Action: pb.Entry_Delete,
+				Term:   int32(h.node.GetCurTerm()),
+			}
 			// Is this necessary to add an entry to delete this data if timeout?
-			entry := node.NewEntry(node.Action_Delete, key, value, h.node.GetCurTerm())
-			h.node.AppendLogs(entry)
+			h.node.AppendLogs(&entry)
 			return
 		case <-time.After(applyStatusInterval):
 			if v := h.node.GetData(key); value == v {

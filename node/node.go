@@ -26,6 +26,18 @@ import (
 	pb "github.com/bjzhang1101/raft/protobuf"
 )
 
+type aeStatus int8
+
+const (
+	success aeStatus = iota
+
+	termFailure
+
+	consistencyFailure
+
+	networkFailure
+)
+
 const (
 	baseElectionTimeoutMs   = 5000
 	jitterElectionTimeoutMs = 5000
@@ -114,8 +126,10 @@ type LeaderAttributes struct {
 func NewNode(id string, quorum []string, grpcClientPort int) *Node {
 	log.Printf("initializing raft node %s", id)
 
-	// The first index for the meaningful log is 1 instead of 0.
-	logs := []*pb.Entry{nil}
+	// The first index for the meaningful log is 1 instead of 0. Explicitly
+	// set the first placeholder entry's term to be 0 so that the consistency
+	// check starts with a clean state.
+	logs := []*pb.Entry{{Term: 0}}
 	data := make(map[string]string)
 	n := Node{
 		ID:      id,
@@ -192,6 +206,11 @@ func (n *Node) SetCurLeader(s string) {
 	n.FollowerAttr.CurLeader = s
 }
 
+// GetLogs returns the logs of the node.
+func (n *Node) GetLogs() []*pb.Entry {
+	return n.Logs
+}
+
 // GetLogAction returns the action for the logs[idx].
 //
 // This function assumes idx is always valid.
@@ -213,6 +232,11 @@ func (n *Node) GetLogValue(idx int) string {
 	return n.Logs[idx].Value
 }
 
+// SetLogs override the logs by the given new log list.
+func (n *Node) SetLogs(logs []*pb.Entry) {
+	n.Logs = logs
+}
+
 // AppendLogs appends logs with the given entry.
 func (n *Node) AppendLogs(entry *pb.Entry) error {
 	if n.State != Leader {
@@ -232,6 +256,11 @@ func (n *Node) GetAllData() map[string]string {
 // GetData returns the value of the key.
 func (n *Node) GetData(key string) string {
 	return n.Data[key]
+}
+
+// GetCommitIdx returns the node's commit index.
+func (n *Node) GetCommitIdx() int {
+	return n.CommitIdx
 }
 
 // SetElectionTimeout refreshes the node's election timeout by re-generate a
@@ -267,7 +296,7 @@ func (n *Node) Start(ctx context.Context) <-chan struct{} {
 		case Candidate:
 			err = n.startCandidate(ctx)
 		case Leader:
-			err = n.startLeader(ctx)
+			n.startLeader(ctx)
 		}
 
 		if err != nil {
@@ -331,27 +360,25 @@ func (n *Node) startCandidate(ctx context.Context) error {
 	return nil
 }
 
-func (n *Node) startLeader(ctx context.Context) error {
+func (n *Node) startLeader(ctx context.Context) {
 	log.Printf("node %s became Leader", n.ID)
 	n.resetLeader(ctx)
 	n.SetCurLeader(n.GetID())
 
 	// Send a heartbeat immediately after a node is promoted to be a Leader.
-	if accepted, term := n.appendEntries(ctx, pb.Entry_Tick, "", ""); !accepted {
-		log.Printf("node %s got rejected by followers", n.ID)
+	if !n.sendHeartbeatForAllClient(ctx) {
+		log.Printf("node %s is no longer qualified a Leader", n.ID)
 		n.SetState(Follower)
-		n.SetCurTerm(term)
-		return nil
+		return
 	}
 
 	for {
 		select {
 		case <-time.After(tickInterval):
-			if accepted, term := n.appendEntries(ctx, pb.Entry_Tick, "", ""); !accepted {
-				log.Printf("node %s got rejected by followers", n.ID)
+			if !n.appendEntriesForAllClient(ctx) {
+				log.Printf("node %s is no longer qualified a Leader", n.ID)
 				n.SetState(Follower)
-				n.SetCurTerm(term)
-				return nil
+				return
 			}
 		}
 	}
@@ -397,25 +424,26 @@ func (n *Node) requestVote(ctx context.Context) bool {
 	return false
 }
 
-func (n *Node) sendHeartbeat(ctx context.Context, c *grpc.Client) (bool, int) {
+func (n *Node) sendHeartbeat(ctx context.Context, c *grpc.Client) aeStatus {
 	reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
 	defer cancel()
 
 	curTerm := n.GetCurTerm()
 
-	_, term, err := c.AppendEntries(reqCtx, n.GetID(), curTerm, nil)
+	_, term, err := c.AppendEntries(reqCtx, n.GetID(), int32(curTerm), -1, -1, -1, nil)
 	if err != nil {
 		log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
 	}
 
 	if curTerm < term {
-		return false, term
+		n.SetCurTerm(term)
+		return termFailure
 	}
 
-	return true, n.GetCurTerm()
+	return success
 }
 
-func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) (bool, int) {
+func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) aeStatus {
 	follower := c.GetAddress()
 
 	// TODO: this part need a careful revisit tomorrow.
@@ -425,10 +453,8 @@ func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) (bool, int) {
 
 	var entries []*pb.Entry
 	prevLogIdx := n.LeaderAttr.NextIdx[follower] - 1
-	var prevLogTerm int
-	if prevLogIdx != 0 {
-		n.Logs[prevLogIdx]
-	}
+	prevLogTerm := n.Logs[prevLogIdx].GetTerm()
+
 	for i := n.LeaderAttr.NextIdx[follower]; i < len(n.Logs); i++ {
 		entries = append(entries, &pb.Entry{
 			Key:    n.GetLogKey(i),
@@ -441,48 +467,62 @@ func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) (bool, int) {
 	defer cancel()
 
 	curTerm := n.GetCurTerm()
-	accepted, term, err := c.AppendEntries(reqCtx, n.GetID(), curTerm, nil)
+	accepted, term, err := c.AppendEntries(reqCtx, n.GetID(), int32(curTerm), int32(n.GetCommitIdx()), int32(prevLogIdx), prevLogTerm, entries)
+
+	// If the follower does not respond, keep retrying forever.
 	if err != nil {
 		log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
+		return networkFailure
 	}
 
+	// If the follower has larger term, return false.
 	if curTerm < term {
-		return false, term
+		n.SetCurTerm(term)
+		return termFailure
 	}
 
-	// TODO: retry on accepted
+	// If the consistency check fails, decrement nextIdx and return false.
 	if !accepted {
-
+		n.LeaderAttr.NextIdx[follower]--
+		return consistencyFailure
 	}
 
-	return true, n.GetCurTerm()
+	n.LeaderAttr.NextIdx[follower] += len(entries)
+	n.LeaderAttr.MatchIdx[follower] = n.LeaderAttr.NextIdx[follower] - 1
+
+	return success
 
 }
 
-func (n *Node) appendEntriesForAllClient(ctx context.Context) (bool, int) {
+func (n *Node) sendHeartbeatForAllClient(ctx context.Context) bool {
 	for _, c := range n.LeaderAttr.TickClients {
-		reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
-
-		curTerm := n.GetCurTerm()
-
-		accepted, term, err := c.AppendEntries(reqCtx, n.GetID(), curTerm, action, k, v)
-
-		if curTerm < term {
-			cancel()
-			return false, term
-		}
-
-		if err != nil {
-			log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
-		}
-
-		cancel()
-		if !accepted {
-			// TODO: Shouldn't return false, need retry.
-			return false, term
+		switch n.sendHeartbeat(ctx, c) {
+		case termFailure:
+			return false
+		default:
 		}
 	}
-	return true, n.GetCurTerm()
+	return true
+}
+
+func (n *Node) appendEntriesForAllClient(ctx context.Context) bool {
+	consensus := 1
+
+	// TODO: make it in parallel.
+	// TODO: add a mutex so that during this operation logs will not change.
+	for _, c := range n.LeaderAttr.TickClients {
+		switch n.appendEntries(ctx, c) {
+		case termFailure:
+			return false
+		case success:
+			consensus++
+		}
+	}
+
+	if consensus > len(n.Quorum)/2 {
+		n.CommitIdx = len(n.Logs) - 1
+	}
+	return true
 }
 
 func (n *Node) apply(action pb.Entry_Action, k, v string) error {
