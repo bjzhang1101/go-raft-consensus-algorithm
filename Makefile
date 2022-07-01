@@ -15,7 +15,7 @@ dependencies:
 DOCKER_ENV := $(shell minikube docker-env)
 .PHONY: docker-build
 docker-build:
-	@eval $(DOCKER_ENV)
+	eval $(DOCKER_ENV)
 	@docker build --rm -t raft:$(tag) .
 	# Prune intermediate builder image.
 	@docker image prune -f --filter label=stage=builder

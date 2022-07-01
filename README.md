@@ -15,18 +15,23 @@ Go implementation of [Raft Consensus Protocol](https://raft.github.io/).
 $ minikube start
 ```
 
-2. Build raft image locally using the Dockerfile
+2. Setup Docker build env
+```bash
+$ eval $(minikube docker-env)
+```
+
+3. Build raft image locally using the Dockerfile
 ```bash
 $ make docker-build tag=0.0.1 
 ```
 
-3. Apply the Kubernetes manifests for the Raft cluster
+4. Apply the Kubernetes manifests for the Raft cluster
 ```bash
 # It includes 3 nodes right now.
 $ kubectl apply -f demo/ --context minikube 
 ```
 
-4. Verify the raft pod is bootstrapped and able to serve traffic
+5. Verify the raft pod is bootstrapped and able to serve traffic
 ```bash
 $ kubectl -n raft get pods --context minikube
 NAME                    READY   STATUS    RESTARTS   AGE

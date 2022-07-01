@@ -39,14 +39,14 @@ func NewServer(node *node.Node) *grpc.Server {
 func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.TickResponse, error) {
 	leaderCurTerm := int(in.GetLeaderCurTerm())
 	curTerm := s.node.GetCurTerm()
-	log.Printf("processing append entry request - id: %s, term: %d", in.GetLeaderId(), leaderCurTerm)
 
 	// Term check.
 	if curTerm > leaderCurTerm {
+		log.Printf("current leader %s term is stale, reject the request", in.GetLeaderId())
 		return &pb.TickResponse{Accept: false, Term: int32(curTerm)}, nil
 	}
 
-	s.node.SetElectionTimeout()
+	s.node.AppendTickC()
 	s.node.SetCurTerm(leaderCurTerm)
 	s.node.SetCurLeader(in.GetLeaderId())
 	s.node.SetCommitIdx(int(in.GetLeaderCommitIdx()))
@@ -55,6 +55,8 @@ func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.Tic
 	if len(in.GetEntries()) == 0 {
 		return &pb.TickResponse{Accept: true, Term: int32(curTerm)}, nil
 	}
+
+	log.Printf("processing append entry request - id: %s, term: %d", in.GetLeaderId(), leaderCurTerm)
 
 	// Consistency check.
 	logs := s.node.GetLogs()
@@ -74,6 +76,7 @@ func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.Tic
 		newLogs = append(newLogs, e)
 	}
 
+	s.node.SetLogs(newLogs)
 	return &pb.TickResponse{Accept: true, Term: int32(curTerm)}, nil
 }
 
@@ -92,7 +95,7 @@ func (s *Server) RequestVote(ctx context.Context, in *pb.TickRequest) (*pb.TickR
 		return &pb.TickResponse{Accept: false, Term: int32(s.node.GetCurTerm())}, nil
 	}
 
-	s.node.SetElectionTimeout()
+	s.node.AppendTickC()
 	s.node.SetVotedForTerm(term)
 	return &pb.TickResponse{Accept: true, Term: int32(s.node.GetCurTerm())}, nil
 }

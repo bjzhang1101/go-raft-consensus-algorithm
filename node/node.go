@@ -89,18 +89,6 @@ type Node struct {
 	// LastApplied is the index of the highest log known to be applied.
 	LastApplied int
 
-	// FollowerAttr includes attributes for follower state.
-	FollowerAttr *FollowerAttributes
-
-	// LeaderAttr includes attributes for leader state.
-	LeaderAttr *LeaderAttributes
-}
-
-// FollowerAttributes is the follower attributes.
-//
-// TODO: this is most likely useless. Both CurLeader and ElectionTimeout
-// can be moved into Node.
-type FollowerAttributes struct {
 	// CurLeader is the current leader of the quorum.
 	CurLeader string
 
@@ -108,6 +96,12 @@ type FollowerAttributes struct {
 	// (or restart for Candidate) leader election if it receives no
 	// communication over the period of time.
 	ElectionTimeout time.Duration
+
+	// TickC is the channel to make sure the follower received ticks.
+	TickC chan struct{}
+
+	// LeaderAttr includes attributes for leader state.
+	LeaderAttr *LeaderAttributes
 }
 
 type LeaderAttributes struct {
@@ -142,10 +136,10 @@ func NewNode(id string, quorum []string, grpcClientPort int) *Node {
 
 	n.VotedPerTerm = make(map[int]struct{})
 
-	n.FollowerAttr = &FollowerAttributes{}
-
 	rand.Seed(time.Now().UnixNano())
 	n.SetElectionTimeout()
+
+	n.TickC = make(chan struct{}, 1)
 
 	var tickClients []*grpc.Client
 	for _, member := range quorum {
@@ -198,12 +192,12 @@ func (n *Node) SetCurTerm(term int) {
 
 // GetCurLeader returns current leader of the follower.
 func (n *Node) GetCurLeader() string {
-	return n.FollowerAttr.CurLeader
+	return n.CurLeader
 }
 
 // SetCurLeader sets the current leader of the quorum.
-func (n *Node) SetCurLeader(s string) {
-	n.FollowerAttr.CurLeader = s
+func (n *Node) SetCurLeader(l string) {
+	n.CurLeader = l
 }
 
 // GetLogs returns the logs of the node.
@@ -263,10 +257,15 @@ func (n *Node) GetCommitIdx() int {
 	return n.CommitIdx
 }
 
+// GetElectionTimeout returns the election timeout for the node.
+func (n *Node) GetElectionTimeout() time.Duration {
+	return n.ElectionTimeout
+}
+
 // SetElectionTimeout refreshes the node's election timeout by re-generate a
 // random time duration.
 func (n *Node) SetElectionTimeout() {
-	n.FollowerAttr.ElectionTimeout = time.Duration(rand.Intn(baseElectionTimeoutMs)+jitterElectionTimeoutMs) * time.Millisecond
+	n.ElectionTimeout = time.Duration(rand.Intn(baseElectionTimeoutMs)+jitterElectionTimeoutMs) * time.Millisecond
 }
 
 // GetVotedPerTerm returns the hash set of voted term.
@@ -284,7 +283,16 @@ func (n *Node) SetCommitIdx(idx int) {
 	n.CommitIdx = idx
 }
 
+// AppendTickC appends an empty struct to TickC.
+func (n *Node) AppendTickC() {
+	n.TickC <- struct{}{}
+}
+
 // Start is the main goroutine for a node's main functionality.
+//
+// TODO: there is a bug here:
+// right now if a follower get down and return back, it will fail to receive
+// tick and refresh its election timeout.
 func (n *Node) Start(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	var err error
@@ -334,15 +342,22 @@ func (n *Node) Apply(ctx context.Context) {
 
 func (n *Node) startFollower(ctx context.Context) error {
 	log.Printf("node %s became Follower", n.ID)
-	n.SetElectionTimeout()
+	n.resetFollower()
 
 	for {
 		select {
-		case <-time.After(n.FollowerAttr.ElectionTimeout):
+		case <-time.After(n.GetElectionTimeout()):
 			n.SetState(Candidate)
 			return nil
+		case <-n.TickC:
+			n.SetElectionTimeout()
 		}
 	}
+}
+
+func (n *Node) resetFollower() {
+	n.SetElectionTimeout()
+	n.TickC = make(chan struct{}, 1)
 }
 
 func (n *Node) startCandidate(ctx context.Context) error {

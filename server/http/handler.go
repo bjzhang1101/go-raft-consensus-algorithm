@@ -117,6 +117,28 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 		}
 
 		b.Success = true
+
+		for {
+			select {
+			case <-time.After(requestTimeout):
+				ctx.SetStatusCode(fasthttp.StatusInternalServerError)
+
+				entry := pb.Entry{
+					Key:    key,
+					Value:  value,
+					Action: pb.Entry_Delete,
+					Term:   int32(h.node.GetCurTerm()),
+				}
+				// Is this necessary to add an entry to delete this data if timeout?
+				h.node.AppendLogs(&entry)
+				return
+			case <-time.After(applyStatusInterval):
+				if v := h.node.GetData(key); value == v {
+					counter++
+					return
+				}
+			}
+		}
 	}
 
 	body, err := json.Marshal(b)
@@ -125,26 +147,4 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 		return
 	}
 	ctx.SetBody(body)
-
-	for {
-		select {
-		case <-time.After(requestTimeout):
-			ctx.SetStatusCode(fasthttp.StatusInternalServerError)
-
-			entry := pb.Entry{
-				Key:    key,
-				Value:  value,
-				Action: pb.Entry_Delete,
-				Term:   int32(h.node.GetCurTerm()),
-			}
-			// Is this necessary to add an entry to delete this data if timeout?
-			h.node.AppendLogs(&entry)
-			return
-		case <-time.After(applyStatusInterval):
-			if v := h.node.GetData(key); value == v {
-				counter++
-				return
-			}
-		}
-	}
 }
