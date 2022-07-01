@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+option go_package = "github.com/bjzhang1101/raft/protobuf";
+package protobuf;
+
+// Entry is the log entry that includes the data and the term.
+message Entry {
+  string key = 1;
+  string value = 2;
+  Action action = 3;
+  enum Action {
+    Insert = 0;
+    Get = 1;
+    Update = 2;
+    Delete = 3;
+    Tick = 4;
+  }
+  // term is the term that when this specific log entry is replicated.
+  int32 term = 4;
+}

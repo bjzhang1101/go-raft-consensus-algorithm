@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/pflag"
 
-	grpc "github.com/bjzhang1101/raft/grpc/server"
-	"github.com/bjzhang1101/raft/http"
 	"github.com/bjzhang1101/raft/node"
+	"github.com/bjzhang1101/raft/server/grpc"
+	"github.com/bjzhang1101/raft/server/http"
 )
 
 var (
@@ -44,6 +44,11 @@ func main() {
 	// Goroutine for node operations.
 	go func() {
 		nodeDone = n.Start(ctx)
+	}()
+
+	// Goroutine for apply logs.
+	go func() {
+		n.Apply(ctx)
 	}()
 
 	// Server to respond http requests.

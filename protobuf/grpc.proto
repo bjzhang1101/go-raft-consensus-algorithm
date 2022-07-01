@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+option go_package = "github.com/bjzhang1101/raft/protobuf";
+import "protobuf/entry.proto";
+
+package protobuf;
+
+// TickRequest is the message containing information inside a tick.
+message TickRequest {
+  // leaderId is the Leader's ID.
+  string leaderId = 1;
+  // leaderCurTerm is the Leader's current term.
+  int32 leaderCurTerm = 2;
+  // leaderCommitIdx is the leader's last commit index.
+  int32 leaderCommitIdx = 3;
+  // prevLogIdx is the index of log entry immediately preceding new ones.
+  int32 prevLogIdx = 4;
+  // prevLogTerm is the term of the prevLogIdx entry.
+  int32 prevLogTerm = 5;
+  // entries is the list of entry that the Leader trying to make this Follower
+  // replicated.
+  repeated Entry entries = 6;
+}
+
+// TickResponse is the message containing whether the tick is accepted.
+message TickResponse {
+  bool accept = 1;
+  int32 term = 2;
+}
+
+service Ticker {
+  // AppendEntries is the function that the Leader sent to followers to sync
+  // data and keep leadership.
+  rpc AppendEntries (TickRequest) returns (TickResponse) {}
+
+  // RequestVote is the function that the Candidate sent to followers to
+  // requests their votes for leader election.
+  rpc RequestVote (TickRequest) returns (TickResponse) {}
+}

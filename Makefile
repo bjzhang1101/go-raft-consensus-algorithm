@@ -15,7 +15,7 @@ dependencies:
 DOCKER_ENV := $(shell minikube docker-env)
 .PHONY: docker-build
 docker-build:
-	@eval $(DOCKER_ENV)
+	eval $(DOCKER_ENV)
 	@docker build --rm -t raft:$(tag) .
 	# Prune intermediate builder image.
 	@docker image prune -f --filter label=stage=builder
@@ -33,4 +33,4 @@ tidy:
 
 .PHONY: proto-gen
 proto-gen:
-	@protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative grpc/protobuf/*.proto
+	@protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative protobuf/*.proto

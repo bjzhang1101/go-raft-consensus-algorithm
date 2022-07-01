@@ -17,7 +17,9 @@ const (
 	// Server rejects requests with bodies exceeding this limit.
 	maxRequestBodySize = 4 * 1024 * 1024
 
-	statusPath = "/state"
+	statusPath      = "/state"
+	getAllDataPath  = "/get_all_data"
+	operateDataPath = "/operate_data"
 )
 
 // NewServer creates an HTTP server serving requests.
@@ -29,6 +31,10 @@ func NewServer(node *node.Node) *fasthttp.Server {
 		switch p := string(ctx.Path()); p {
 		case statusPath:
 			handler.HandleState(ctx)
+		case getAllDataPath:
+			handler.HandleGetAllData(ctx)
+		case operateDataPath:
+			handler.HandleOperateData(ctx)
 		default:
 			handler.HandleBlackHole(ctx)
 		}
