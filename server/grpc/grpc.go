@@ -3,6 +3,7 @@ package grpc
 import (
 	"context"
 	"log"
+	"math"
 
 	"google.golang.org/grpc"
 
@@ -49,10 +50,10 @@ func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.Tic
 	s.node.AppendTickC()
 	s.node.SetCurTerm(leaderCurTerm)
 	s.node.SetCurLeader(in.GetLeaderId())
-	s.node.SetCommitIdx(int(in.GetLeaderCommitIdx()))
 
 	// Return directly for heartbeat.
 	if len(in.GetEntries()) == 0 {
+		s.node.SetCommitIdx(int(math.Min(float64(in.GetLeaderCommitIdx()), float64(len(s.node.GetLogs())-1))))
 		return &pb.TickResponse{Accept: true, Term: int32(curTerm)}, nil
 	}
 
@@ -77,6 +78,7 @@ func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.Tic
 	}
 
 	s.node.SetLogs(newLogs)
+	s.node.SetCommitIdx(int(math.Min(float64(in.GetLeaderCommitIdx()), float64(len(s.node.GetLogs())-1))))
 	return &pb.TickResponse{Accept: true, Term: int32(curTerm)}, nil
 }
 
