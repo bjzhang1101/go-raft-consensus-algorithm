@@ -24,6 +24,11 @@ func (c *Client) GetAddress() string {
 	return c.address
 }
 
+// GetPort returns the destination port of the client.
+func (c *Client) GetPort() int {
+	return c.port
+}
+
 // NewClient returns a new gRPC client sending ticks between Raft nodes.
 func NewClient(a string, p int) *Client {
 	log.Printf("starting new gRPC client to %s:%d", a, p)
@@ -47,7 +52,7 @@ func NewClient(a string, p int) *Client {
 // data and keep leadership.
 func (c *Client) AppendEntries(ctx context.Context, id string, term, commitIdx, prevLogIdx, prevLogTerm int32, entries []*pb.Entry) (bool, int, error) {
 	if len(entries) > 0 {
-		log.Printf("sending append entry request with entries %v in term %d", entries, term)
+		log.Printf("sending append entry request with entries %v in term %d to %s", entries, term, c.GetAddress())
 	}
 
 	r, err := c.c.AppendEntries(ctx, &pb.TickRequest{

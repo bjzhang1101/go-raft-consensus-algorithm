@@ -205,11 +205,11 @@ func (n *Node) GetLogs() []*pb.Entry {
 	return n.Logs
 }
 
-// GetLogAction returns the action for the logs[idx].
+// GetLog returns the log for the index.
 //
 // This function assumes idx is always valid.
-func (n *Node) GetLogAction(idx int) pb.Entry_Action {
-	return n.Logs[idx].Action
+func (n *Node) GetLog(idx int) *pb.Entry {
+	return n.Logs[idx]
 }
 
 // GetLogKey returns the key for the logs[idx].
@@ -224,6 +224,13 @@ func (n *Node) GetLogKey(idx int) string {
 // This function assumes idx is always valid.
 func (n *Node) GetLogValue(idx int) string {
 	return n.Logs[idx].Value
+}
+
+// GetLogAction returns the action for the logs[idx].
+//
+// This function assumes idx is always valid.
+func (n *Node) GetLogAction(idx int) pb.Entry_Action {
+	return n.Logs[idx].Action
 }
 
 // SetLogs override the logs by the given new log list.
@@ -257,6 +264,11 @@ func (n *Node) GetCommitIdx() int {
 	return n.CommitIdx
 }
 
+// GetLastApplied returns the node's last applied.
+func (n *Node) GetLastApplied() int {
+	return n.LastApplied
+}
+
 // GetElectionTimeout returns the election timeout for the node.
 func (n *Node) GetElectionTimeout() time.Duration {
 	return n.ElectionTimeout
@@ -288,15 +300,61 @@ func (n *Node) AppendTickC() {
 	n.TickC <- struct{}{}
 }
 
+// GetNextIdx returns a copy of NextIdx map.
+func (n *Node) GetNextIdx() map[string]int {
+	m := make(map[string]int)
+
+	for k, v := range n.LeaderAttr.NextIdx {
+		m[k] = v
+	}
+	return m
+}
+
+// GetMatchIdx returns a copy of MatchIdx map.
+func (n *Node) GetMatchIdx() map[string]int {
+	m := make(map[string]int)
+
+	for k, v := range n.LeaderAttr.MatchIdx {
+		m[k] = v
+	}
+	return m
+}
+
 // Start is the main goroutine for a node's main functionality.
 //
 // TODO: there is a bug here:
 // right now if a follower get down and return back, it will fail to receive
 // tick and refresh its election timeout.
 func (n *Node) Start(ctx context.Context) <-chan struct{} {
+	// The goroutine to apply committed log entries.
+	go func() {
+		for {
+			select {
+			case <-time.After(applyInterval):
+				if n.CommitIdx > n.LastApplied {
+					for i := n.LastApplied + 1; i <= n.CommitIdx && i < len(n.GetLogs()); i++ {
+						action := n.GetLogAction(i)
+						key := n.GetLogKey(i)
+						value := n.GetLogValue(i)
+
+						if err := n.apply(action, key, value); err != nil {
+							log.Printf("failed to apply operation %s for key: %s, value: %s because %v", action, key, value, err)
+							// TODO: reconsider error handling when the log
+							// entry failed to execute. Right now we just
+							// ignore it because we don't want a bad entry to
+							// block the entire pipeline.
+						} else {
+							log.Printf("applied operation %s for key: %s, value: %s", action, key, value)
+						}
+						n.LastApplied++
+					}
+				}
+			}
+		}
+	}()
+
 	done := make(chan struct{})
 	var err error
-
 	for {
 		switch n.State {
 		case Follower:
@@ -311,31 +369,6 @@ func (n *Node) Start(ctx context.Context) <-chan struct{} {
 			n.SetState(Down)
 			close(done)
 			return done
-		}
-	}
-}
-
-// Apply applies committed logs.
-//
-// TODO: this should be able to put in the Start() goroutine.
-func (n *Node) Apply(ctx context.Context) {
-	for {
-		select {
-		case <-time.After(applyInterval):
-			if n.CommitIdx > n.LastApplied {
-				for i := n.LastApplied + 1; i <= n.CommitIdx; i++ {
-					action := n.GetLogAction(i)
-					key := n.GetLogKey(i)
-					value := n.GetLogValue(i)
-
-					if err := n.apply(action, key, value); err != nil {
-						log.Printf("failed to apply operation %s for key: %s, value: %s", action, key, value)
-						break
-					}
-					log.Printf("applied operation %s for key: %s, value: %s", action, key, value)
-					n.LastApplied++
-				}
-			}
 		}
 	}
 }
@@ -445,7 +478,7 @@ func (n *Node) sendHeartbeat(ctx context.Context, c *grpc.Client) aeStatus {
 
 	curTerm := n.GetCurTerm()
 
-	_, term, err := c.AppendEntries(reqCtx, n.GetID(), int32(curTerm), -1, -1, -1, nil)
+	_, term, err := c.AppendEntries(reqCtx, n.GetID(), int32(curTerm), int32(n.GetCommitIdx()), -1, -1, nil)
 	if err != nil {
 		log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
 	}
@@ -461,7 +494,6 @@ func (n *Node) sendHeartbeat(ctx context.Context, c *grpc.Client) aeStatus {
 func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) aeStatus {
 	follower := c.GetAddress()
 
-	// TODO: this part need a careful revisit tomorrow.
 	if len(n.Logs) < n.LeaderAttr.NextIdx[follower] {
 		return n.sendHeartbeat(ctx, c)
 	}
@@ -471,11 +503,7 @@ func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) aeStatus {
 	prevLogTerm := n.Logs[prevLogIdx].GetTerm()
 
 	for i := n.LeaderAttr.NextIdx[follower]; i < len(n.Logs); i++ {
-		entries = append(entries, &pb.Entry{
-			Key:    n.GetLogKey(i),
-			Value:  n.GetLogValue(i),
-			Action: n.GetLogAction(i),
-		})
+		entries = append(entries, n.GetLog(i))
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, grpcReqTimeout)
@@ -484,9 +512,10 @@ func (n *Node) appendEntries(ctx context.Context, c *grpc.Client) aeStatus {
 	curTerm := n.GetCurTerm()
 	accepted, term, err := c.AppendEntries(reqCtx, n.GetID(), int32(curTerm), int32(n.GetCommitIdx()), int32(prevLogIdx), prevLogTerm, entries)
 
-	// If the follower does not respond, keep retrying forever.
+	// If the follower does not respond, re-create the client and keep
+	// retrying forever.
 	if err != nil {
-		log.Printf("received error response from %s in term %d", c.GetAddress(), n.GetCurTerm())
+		log.Printf("received error response from %s in term %d: %v", c.GetAddress(), n.GetCurTerm(), err)
 		return networkFailure
 	}
 
@@ -525,12 +554,16 @@ func (n *Node) appendEntriesForAllClient(ctx context.Context) bool {
 
 	// TODO: make it in parallel.
 	// TODO: add a mutex so that during this operation logs will not change.
-	for _, c := range n.LeaderAttr.TickClients {
+	for i, c := range n.LeaderAttr.TickClients {
 		switch n.appendEntries(ctx, c) {
 		case termFailure:
 			return false
+		case networkFailure:
+			n.LeaderAttr.TickClients[i] = grpc.NewClient(c.GetAddress(), c.GetPort())
 		case success:
 			consensus++
+		default:
+			// Do nothing for other failures because retry will handle it.
 		}
 	}
 

@@ -12,10 +12,11 @@ GOIMPORTS_EXISTS := $(shell command -v goimports 2> /dev/null)
 dependencies:
 	@if [ -z "$(GOIMPORTS_EXISTS)" ] ; then go install golang.org/x/tools/cmd/goimports@latest ; fi
 
-DOCKER_ENV := $(shell minikube docker-env)
+# eval $(minikube docker-env)
 .PHONY: docker-build
 docker-build:
-	eval $(DOCKER_ENV)
+	# Delete previous built image with the same tag.
+	@docker rmi -f raft:$(tag)
 	@docker build --rm -t raft:$(tag) .
 	# Prune intermediate builder image.
 	@docker image prune -f --filter label=stage=builder
