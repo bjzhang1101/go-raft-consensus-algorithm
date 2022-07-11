@@ -11,10 +11,10 @@ type config struct {
 	// ID is the identity of the node.
 	ID string `yaml:"id"`
 
-	// Quorum is a list of IP addresses that includes all the nodes that
+	// Quorum is a list of DNS addresses that includes all the nodes that
 	// forms the Raft cluster.
 	//
-	// In the first version we assume nodes in the quorum have static IPs.
+	// In the first version we use the cluster.local CNAME of each node.
 	Quorum []string `yaml:"quorum"`
 }
 

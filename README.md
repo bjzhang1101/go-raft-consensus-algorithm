@@ -42,30 +42,30 @@ raft-03-86bcd95b5-msg4b    1/1     Running   0          21m
 $ kubectl -n raft-client exec -it raft-client-7bc9d7884c-b4bxt -- env bash
 
 # Check node raft-02 state.
-$ root@raft-client-7bc9d7884c-b4bxt:/# curl raft-02.raft.svc:8080/state
+$ root@raft-client-7bc9d7884c-b4bxt:/ curl raft-02.raft.svc:8080/state
 {"state":"follower","term":1,"leader":"raft-01.raft.svc.cluster.local"}
 
 # Add a new key-1 from the leader raft-01.
-$ root@raft-client-7bc9d7884c-b4bxt:/# curl -XPOST raft-01.raft.svc:8080/operate_data \
+$ root@raft-client-7bc9d7884c-b4bxt:/ curl -XPOST raft-01.raft.svc:8080/operate_data \
     -H "Content-Type: application/json" \
     -d '{"key": "key-1", "value": "value-1", "action":"add"}'
 
 # Send write request to a follower raft-02.
-$ root@raft-client-7bc9d7884c-b4bxt:/# curl -XPOST raft-02.raft.svc:8080/operate_data \
+$ root@raft-client-7bc9d7884c-b4bxt:/ curl -XPOST raft-02.raft.svc:8080/operate_data \
     -H "Content-Type: application/json" \
     -d '{"key": "key-2", "value": "value-2", "action":"add"}'
 {"success":false,"leader":"raft-01.raft.svc.cluster.local"}
 
 # Check data in a follower raft-02.
-$ root@raft-client-7bc9d7884c-b4bxt:/# curl raft-02.raft.svc:8080/get_all_data
+$ root@raft-client-7bc9d7884c-b4bxt:/ curl raft-02.raft.svc:8080/get_all_data
 {"data":"map[key-1:value-1]"}
 
 # Delete key-1 from the leader raft-01.
-$ root@raft-client-7bc9d7884c-b4bxt:/# curl -XPOST raft-01.raft.svc:8080/operate_data 
+$ root@raft-client-7bc9d7884c-b4bxt:/ curl -XPOST raft-01.raft.svc:8080/operate_data 
     -H "Content-Type: application/json" \
     -d '{"key": "key-1", "action":"del"}'
  
 # Check data in a follower raft-02.
-$ root@raft-client-7bc9d7884c-b4bxt:/# curl raft-02.raft.svc:8080/get_all_data
+$ root@raft-client-7bc9d7884c-b4bxt:/ curl raft-02.raft.svc:8080/get_all_data
 {"data":"map[]"}
 ```
