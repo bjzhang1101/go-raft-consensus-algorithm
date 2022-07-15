@@ -12,8 +12,6 @@ import (
 )
 
 const (
-	applyStatusInterval = 1 * time.Second
-
 	defaultReqTimeout = 5 * time.Second
 )
 
@@ -144,12 +142,12 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 	key := opReq.Key
 	value := opReq.Value
 	if len(key) == 0 {
-		ctx.Error(fmt.Sprint("invalid empty key"), fasthttp.StatusBadRequest)
+		ctx.Error("invalid empty key", fasthttp.StatusBadRequest)
 		return
 	}
 
 	if len(value) == 0 && action != pb.Entry_Delete {
-		ctx.Error(fmt.Sprint("invalid empty value"), fasthttp.StatusBadRequest)
+		ctx.Error("invalid empty value", fasthttp.StatusBadRequest)
 		return
 	}
 
