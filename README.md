@@ -1,4 +1,7 @@
-# Raft Consensus Algorithm Go Implementation
+# Raft Consensus Algorithm
+![test](https://github.com/bjzhang1101/raft/blob/master/.github/workflows/test.yml/badge.svg)
+![build](https://github.com/bjzhang1101/raft/blob/master/.github/workflows/build.yml/badge.svg)
+
 Simple and one-click-to-use Go implementation of [Raft Consensus Protocol](https://raft.github.io/).
 
 ## Run Raft locally in minikube
@@ -22,7 +25,7 @@ $ eval $(minikube docker-env)
 
 3. Build raft image locally using the Dockerfile
 ```bash
-$ make docker-build tag=0.0.1 
+$ make docker-build tag=0.0.1
 ```
 
 4. Apply the Kubernetes manifests for the Raft cluster
