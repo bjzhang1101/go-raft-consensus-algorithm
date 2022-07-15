@@ -1,5 +1,5 @@
-# raft
-Go implementation of [Raft Consensus Protocol](https://raft.github.io/).
+# Raft Consensus Algorithm Go Implementation
+Simple and one-click-to-use Go implementation of [Raft Consensus Protocol](https://raft.github.io/).
 
 ## Run Raft locally in minikube
 
