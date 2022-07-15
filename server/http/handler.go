@@ -13,17 +13,28 @@ import (
 
 const (
 	applyStatusInterval = 1 * time.Second
-	requestTimeout      = 5 * time.Second
+
+	defaultReqTimeout = 5 * time.Second
 )
 
 // Handler handles HTTP requests to the server.
 type Handler struct {
 	node *node.Node
+
+	requestTimeout time.Duration
 }
 
 // NewHandler returns a new HTTP handler.
 func NewHandler(node *node.Node) Handler {
-	return Handler{node: node}
+	return NewHandlerWithTimeout(node, defaultReqTimeout)
+}
+
+// NewHandlerWithTimeout returns a new HTTP handler with request timeout.
+func NewHandlerWithTimeout(node *node.Node, reqTimeout time.Duration) Handler {
+	return Handler{
+		node:           node,
+		requestTimeout: reqTimeout,
+	}
 }
 
 // HandleBlackHole always returns status OK.
@@ -31,20 +42,23 @@ func (h *Handler) HandleBlackHole(ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(fasthttp.StatusOK)
 }
 
+// StateResponse is the response body for request /state.
+type StateResponse struct {
+	State       node.State     `json:"state"`
+	Term        int            `json:"term"`
+	Leader      string         `json:"leader"`
+	CommitIdx   int            `json:"commitIndex"`
+	LastApplied int            `json:"lastApplied"`
+	Logs        []*pb.Entry    `json:"logs"`
+	NextIdx     map[string]int `json:"nextIndex,omitempty"`
+	MatchIdx    map[string]int `json:"matchIndex,omitempty"`
+}
+
 // HandleState handles the request for path /state to return the node's
 // current state.
 func (h *Handler) HandleState(ctx *fasthttp.RequestCtx) {
-	s := struct {
-		Status      string         `json:"state"`
-		Term        int            `json:"term"`
-		Leader      string         `json:"leader"`
-		CommitIdx   int            `json:"commitIndex"`
-		LastApplied int            `json:"lastApplied"`
-		Logs        []*pb.Entry    `json:"logs"`
-		NextIdx     map[string]int `json:"nextIndex,omitempty"`
-		MatchIdx    map[string]int `json:"matchIndex,omitempty"`
-	}{
-		Status:      h.node.GetState().String(),
+	s := StateResponse{
+		State:       h.node.GetState(),
 		Term:        h.node.GetCurTerm(),
 		Leader:      h.node.GetCurLeader(),
 		CommitIdx:   h.node.GetCommitIdx(),
@@ -67,14 +81,15 @@ func (h *Handler) HandleState(ctx *fasthttp.RequestCtx) {
 	ctx.SetBody(body)
 }
 
+// GetAllDataResponse is the response body for request /get_all_data.
+type GetAllDataResponse struct {
+	Data map[string]string `json:"data"`
+}
+
 // HandleGetAllData handles the request for path /get_all_data to return the
 // node's current data store.
 func (h *Handler) HandleGetAllData(ctx *fasthttp.RequestCtx) {
-	s := struct {
-		Data string `json:"data"`
-	}{
-		Data: fmt.Sprintf("%v", h.node.GetAllData()),
-	}
+	s := GetAllDataResponse{Data: h.node.GetAllData()}
 
 	body, err := json.Marshal(s)
 	if err != nil {
@@ -86,13 +101,22 @@ func (h *Handler) HandleGetAllData(ctx *fasthttp.RequestCtx) {
 	ctx.SetBody(body)
 }
 
-type operateDataRequestBody struct {
+// OperateDataRequest is the request body for request /operate_data.
+type OperateDataRequest struct {
 	// Key is the key of the log entry.
 	Key string `json:"key"`
 	// Value is the value of the log entry.
 	Value string `json:"value"`
 	// Action is the action for the log entry.
 	Action string `json:"action"`
+}
+
+// OperateDataResponse is the response body for request /operate_data.
+type OperateDataResponse struct {
+	// Success indicates whether the /operate_data request is successful.
+	Success bool `json:"success"`
+	// Leader shows the current leader if the request is sent to a follower.
+	Leader string `json:"leader"`
 }
 
 // HandleOperateData handles the request for path /operate_data to insert,
@@ -103,13 +127,8 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	b := struct {
-		Success bool   `json:"success"`
-		Leader  string `json:"leader"`
-	}{}
-
 	reqBody := ctx.Request.Body()
-	var opReq operateDataRequestBody
+	var opReq OperateDataRequest
 
 	if err := json.Unmarshal(reqBody, &opReq); err != nil {
 		ctx.Error(fmt.Sprintf("failed to parse request body: %v", err), fasthttp.StatusBadRequest)
@@ -134,10 +153,8 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 		return
 	}
 
-	if h.node.GetState() != node.Leader {
-		b.Success = false
-		b.Leader = h.node.GetCurLeader()
-	} else {
+	b := OperateDataResponse{Success: false, Leader: h.node.GetCurLeader()}
+	if h.node.GetState() == node.Leader {
 		entry := pb.Entry{
 			Key:    key,
 			Value:  value,
@@ -149,18 +166,37 @@ func (h *Handler) HandleOperateData(ctx *fasthttp.RequestCtx) {
 			return
 		}
 
-		for {
-			select {
-			case <-time.After(requestTimeout):
-				ctx.Error("failed to apply entries", fasthttp.StatusInternalServerError)
+		b.Success = true
+
+		// TODO: This logic is not correct, we can't check data to determine
+		// whether the log entry is applied. It should decide based on the
+		// operation.
+		//
+		// Can we check quorum's log entries? If they have the same entry,
+		// return true?
+
+		/*
+			if v := h.node.GetData(key); value == v {
+				b.Success = true
+				ctx.SetStatusCode(fasthttp.StatusOK)
 				return
-			case <-time.After(applyStatusInterval):
-				if v := h.node.GetData(key); value == v {
-					b.Success = true
+			}
+
+			for {
+				select {
+				case <-time.After(h.requestTimeout):
+					ctx.Error("failed to apply entries", fasthttp.StatusInternalServerError)
 					return
+				case <-time.After(applyStatusInterval):
+					if v := h.node.GetData(key); value == v {
+						b.Success = true
+						ctx.SetStatusCode(fasthttp.StatusOK)
+						return
+					}
 				}
 			}
-		}
+
+		*/
 	}
 
 	body, err := json.Marshal(b)

@@ -28,6 +28,10 @@ fmt: dependencies
 .PHONY: kube-apply
 	@kubectl apply -f k8s-manifests
 
+.PHONY: test
+test:
+	@go test -coverpkg ./... -coverprofile=cover.out -race ./... -v
+
 .PHONY: tidy
 tidy:
 	@go mod tidy

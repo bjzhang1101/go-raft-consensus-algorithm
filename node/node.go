@@ -1,17 +1,4 @@
 // Package node is the package that defines all behaviors of a Raft node.
-//
-// Behavior of Follower:
-//
-// Behavior of Candidate:
-//
-// Behavior of Leader:
-// 1.The leader receives clients' requests that contains a command to be
-//   executed by the replicated state machines.
-// 2.The leader appends the command to its log as a new entry.
-// 3.The leader issues AppendEntries RPC calls in parallel to its followers.
-// 4.Once the entry is safely replicated, the leader applies the entry to its
-//   state machine.
-// 5.After the entry is applied, the leader respond to the client.
 package node
 
 import (
