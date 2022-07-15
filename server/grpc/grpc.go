@@ -73,9 +73,7 @@ func (s *Server) AppendEntries(ctx context.Context, in *pb.TickRequest) (*pb.Tic
 
 	// Override entries.
 	newLogs := logs[:prevLogIdx+1]
-	for _, e := range in.GetEntries() {
-		newLogs = append(newLogs, e)
-	}
+	newLogs = append(newLogs, in.GetEntries()...)
 
 	s.node.SetLogs(newLogs)
 	s.node.SetCommitIdx(int(math.Min(float64(in.GetLeaderCommitIdx()), float64(len(s.node.GetLogs())-1))))

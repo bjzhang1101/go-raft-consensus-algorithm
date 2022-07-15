@@ -32,9 +32,6 @@ const (
 	tickInterval = 2500 * time.Millisecond
 
 	grpcReqTimeout = 500 * time.Millisecond
-
-	// applyInterval is the interval between each apply operation.
-	applyInterval = 1000 * time.Millisecond
 )
 
 // Node includes all the metadata of a node.
@@ -316,25 +313,29 @@ func (n *Node) Start(ctx context.Context) <-chan struct{} {
 	// The goroutine to apply committed log entries.
 	go func() {
 		for {
-			select {
-			case <-time.After(applyInterval):
-				if n.CommitIdx > n.LastApplied {
-					for i := n.LastApplied + 1; i <= n.CommitIdx && i < len(n.GetLogs()); i++ {
-						action := n.GetLogAction(i)
-						key := n.GetLogKey(i)
-						value := n.GetLogValue(i)
+			// S1037 - Elaborate way of sleeping
+			//
+			// Using a select statement with a single case receiving from the
+			// result of time.After is a very elaborate way of sleeping that
+			// can much simpler be expressed with a simple call to time.Sleep.
+			time.Sleep(tickInterval)
 
-						if err := n.apply(action, key, value); err != nil {
-							log.Printf("failed to apply operation %s for key: %s, value: %s because %v", action, key, value, err)
-							// TODO: reconsider error handling when the log
-							// entry failed to execute. Right now we just
-							// ignore it because we don't want a bad entry to
-							// block the entire pipeline.
-						} else {
-							log.Printf("applied operation %s for key: %s, value: %s", action, key, value)
-						}
-						n.LastApplied++
+			if n.CommitIdx > n.LastApplied {
+				for i := n.LastApplied + 1; i <= n.CommitIdx && i < len(n.GetLogs()); i++ {
+					action := n.GetLogAction(i)
+					key := n.GetLogKey(i)
+					value := n.GetLogValue(i)
+
+					if err := n.apply(action, key, value); err != nil {
+						log.Printf("failed to apply operation %s for key: %s, value: %s because %v", action, key, value, err)
+						// TODO: reconsider error handling when the log
+						// entry failed to execute. Right now we just
+						// ignore it because we don't want a bad entry to
+						// block the entire pipeline.
+					} else {
+						log.Printf("applied operation %s for key: %s, value: %s", action, key, value)
 					}
+					n.LastApplied++
 				}
 			}
 		}
@@ -408,13 +409,17 @@ func (n *Node) startLeader(ctx context.Context) {
 	}
 
 	for {
-		select {
-		case <-time.After(tickInterval):
-			if !n.appendEntriesForAllClient(ctx) {
-				log.Printf("node %s is no longer qualified a Leader", n.ID)
-				n.SetState(Follower)
-				return
-			}
+		// S1037 - Elaborate way of sleeping
+		//
+		// Using a select statement with a single case receiving from the
+		// result of time.After is a very elaborate way of sleeping that can
+		// much simpler be expressed with a simple call to time.Sleep.
+		time.Sleep(tickInterval)
+
+		if !n.appendEntriesForAllClient(ctx) {
+			log.Printf("node %s is no longer qualified a Leader", n.ID)
+			n.SetState(Follower)
+			return
 		}
 	}
 }
