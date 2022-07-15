@@ -1,6 +1,7 @@
 # Raft Consensus Algorithm
 ![test](https://github.com/bjzhang1101/raft/actions/workflows/test.yml/badge.svg)
 ![build](https://github.com/bjzhang1101/raft/actions/workflows/build.yml/badge.svg)
+[![Go Report Card](https://goreportcard.com/badge/github.com/bjzhang1101/raft)](https://goreportcard.com/report/github.com/bjzhang1101/raft)
 
 Simple and one-click-to-use Go implementation of [Raft Consensus Protocol](https://raft.github.io/).
 
